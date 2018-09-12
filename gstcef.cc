@@ -80,7 +80,7 @@ GType gst_cef_src_get_type (void);
 #define gst_cef_src_parent_class parent_class
 G_DEFINE_TYPE (GstCefSrc, gst_cef_src, GST_TYPE_PUSH_SRC);
 
-#define CEF_CAPS "video/x-raw, format=BGRA, framerate=[1/1, 60/1]"
+#define CEF_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1]"
 
 static GstStaticPadTemplate gst_cef_src_template =
 GST_STATIC_PAD_TEMPLATE ("src",
@@ -369,6 +369,7 @@ gst_cef_src_init (GstCefSrc * src)
   src->n_frames = 0;
   src->current_buffer = NULL;
 
+  gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
 }
 
