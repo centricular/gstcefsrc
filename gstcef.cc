@@ -265,9 +265,11 @@ gst_cef_src_query (GstBaseSrc * base_src, GstQuery * query)
     {
       GstClockTime latency;
 
-      latency = gst_util_uint64_scale (GST_SECOND, src->info.fps_d, src->info.fps_n);
-      GST_DEBUG_OBJECT (src, "Reporting latency: %" GST_TIME_FORMAT, GST_TIME_ARGS (latency));
-      gst_query_set_latency (query, TRUE, latency, GST_CLOCK_TIME_NONE);
+      if (src->info.fps_n) {
+        latency = gst_util_uint64_scale (GST_SECOND, src->info.fps_d, src->info.fps_n);
+        GST_DEBUG_OBJECT (src, "Reporting latency: %" GST_TIME_FORMAT, GST_TIME_ARGS (latency));
+        gst_query_set_latency (query, TRUE, latency, GST_CLOCK_TIME_NONE);
+      }
       res = TRUE;
       break;
     }
