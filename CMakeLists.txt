@@ -52,6 +52,8 @@ ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 SET_CEF_TARGET_OUT_DIR()
 
 if(OS_LINUX)
+  link_directories(${GST_LIBRARY_DIRS})
+
   add_executable("gstcefsubprocess" ${GSTCEFSUBPROCESS_SRCS})
   SET_EXECUTABLE_TARGET_PROPERTIES("gstcefsubprocess")
   target_link_libraries("gstcefsubprocess" libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS})
