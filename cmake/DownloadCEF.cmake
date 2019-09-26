@@ -8,8 +8,9 @@
 # Visit http://opensource.spotify.com/cefbuilds/index.html for the list of
 # supported platforms and versions.
 
-function(DownloadCEF platform version download_dir)
+function(DownloadCEF platform version escaped_version download_dir)
   # Specify the binary distribution type and download directory.
+  set(CEF_ESCAPED_DISTRIBUTION "cef_binary_${escaped_version}_${platform}")
   set(CEF_DISTRIBUTION "cef_binary_${version}_${platform}")
   set(CEF_DOWNLOAD_DIR "${download_dir}")
 
@@ -18,7 +19,7 @@ function(DownloadCEF platform version download_dir)
 
   # Download and/or extract the binary distribution if necessary.
   if(NOT IS_DIRECTORY "${CEF_ROOT}")
-    set(CEF_DOWNLOAD_FILENAME "${CEF_DISTRIBUTION}.tar.bz2")
+    set(CEF_DOWNLOAD_FILENAME "${CEF_ESCAPED_DISTRIBUTION}.tar.bz2")
     set(CEF_DOWNLOAD_PATH "${CEF_DOWNLOAD_DIR}/${CEF_DOWNLOAD_FILENAME}")
     if(NOT EXISTS "${CEF_DOWNLOAD_PATH}")
       set(CEF_DOWNLOAD_URL "http://opensource.spotify.com/cefbuilds/${CEF_DOWNLOAD_FILENAME}")

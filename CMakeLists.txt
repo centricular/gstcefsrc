@@ -6,7 +6,8 @@ project(gstcef)
 
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 
-set(CEF_VERSION "3.3440.1806.g65046b7")
+set(CEF_VERSION "75.0.6+g90ecd35+chromium-75.0.3770.80")
+set(CEF_ESCAPED_VERSION "75.0.6%2Bg90ecd35%2Bchromium-75.0.3770.80")
 
 # Determine the platform.
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
@@ -27,7 +28,7 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(DownloadCEF)
-DownloadCEF("${CEF_PLATFORM}" "${CEF_VERSION}" "${CMAKE_SOURCE_DIR}/third_party/cef")
+DownloadCEF("${CEF_PLATFORM}" "${CEF_VERSION}" "${CEF_ESCAPED_VERSION}" "${CMAKE_SOURCE_DIR}/third_party/cef")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CEF_ROOT}/cmake")
 
 find_package(CEF REQUIRED)
@@ -35,6 +36,9 @@ add_subdirectory(${CEF_LIBCEF_DLL_WRAPPER_PATH} libcef_dll_wrapper)
 
 set(GSTCEF_SRCS
   gstcef.cc
+  gstcefsrc.cc
+  gstcefdemux.cc
+  gstcefaudiometa.cc
 )
 
 set(GSTCEFSUBPROCESS_SRCS
@@ -45,7 +49,7 @@ find_package(PkgConfig)
 
 pkg_check_modules(GST REQUIRED gstreamer-1.0
                   gstreamer-video-1.0
-		  gio-2.0)
+                  gstreamer-audio-1.0)
 
 ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 
@@ -60,6 +64,8 @@ if(OS_LINUX)
   set_target_properties("gstcefsubprocess" PROPERTIES INSTALL_RPATH "$ORIGIN")
   set_target_properties("gstcefsubprocess" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
   set_target_properties("gstcefsubprocess" PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CEF_TARGET_OUT_DIR})
+
+  link_directories(${GST_LIBRARY_DIRS})
 
   add_library("gstcef" SHARED ${GSTCEF_SRCS})
   SET_LIBRARY_TARGET_PROPERTIES("gstcef")

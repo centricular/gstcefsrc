@@ -10,18 +10,10 @@ make
 
 ## Run
 
-Because of [this issue], the main executable must be located in the
-same directory as the resources in the build folder. This makes things
-pretty awkward with gst-launch, but can be worked around as follows:
-
-```
-cp `which gst-launch-1.0` Release/
-```
-
 The element can then be tested with:
 
 ```
-GST_PLUGIN_PATH=$PWD/Release:$GST_PLUGIN_PATH Release/gst-launch-1.0 -v cefsrc url="https://webglsamples.org/aquarium/aquarium.html" ! queue ! videoconvert ! xvimagesink
+GST_PLUGIN_PATH=$PWD/Release:$GST_PLUGIN_PATH gst-launch-1.0 cefsrc url="https://soundcloud.com/platform/sama" ! queue ! cefdemux name=d \
+  d.video ! video/x-raw ! queue ! videoconvert ! autovideosink \
+  d. ! audio/x-raw ! queue ! audioconvert ! autoaudiosink async-handling=true
 ```
-
-[this issue]: https://bitbucket.org/chromiumembedded/cef/issues/1936/override-paths-dir_exe-dir_module-on-linux
