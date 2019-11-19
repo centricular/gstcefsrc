@@ -85,6 +85,32 @@ class RenderHandler : public CefRenderHandler
     IMPLEMENT_REFCOUNTING(RenderHandler);
 };
 
+class RequestHandler : public CefRequestHandler
+{
+  public:
+
+    RequestHandler(GstCefSrc *element) :
+        element (element)
+    {
+    }
+
+    ~RequestHandler()
+    {
+    }
+
+    virtual void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status) override
+		{
+			GST_WARNING_OBJECT (element, "Render subprocess terminated, reloading URL!");
+      browser->Reload();
+    }
+
+  private:
+
+    GstCefSrc *element;
+    IMPLEMENT_REFCOUNTING(RequestHandler);
+};
+
+
 class AudioHandler : public CefAudioHandler
 {
   public:
@@ -185,9 +211,10 @@ class BrowserClient : public CefClient
 {
   public:
 
-    BrowserClient(CefRefPtr<CefRenderHandler> rptr, CefRefPtr<CefAudioHandler> aptr) :
+    BrowserClient(CefRefPtr<CefRenderHandler> rptr, CefRefPtr<CefAudioHandler> aptr, CefRefPtr<CefRequestHandler> rqptr) :
         render_handler(rptr),
-        audio_handler(aptr)
+        audio_handler(aptr),
+        request_handler(rqptr)
     {
     }
 
@@ -201,10 +228,16 @@ class BrowserClient : public CefClient
       return audio_handler;
     }
 
+    virtual CefRefPtr<CefRequestHandler> GetRequestHandler() override
+    {
+      return request_handler;
+    }
+
   private:
 
     CefRefPtr<CefRenderHandler> render_handler;
     CefRefPtr<CefAudioHandler> audio_handler;
+    CefRefPtr<CefRequestHandler> request_handler;
 
     IMPLEMENT_REFCOUNTING(BrowserClient);
 };
@@ -291,6 +324,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   CefSettings settings;
   CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
   CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
+  CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
   CefRefPtr<App> app;
   CefRefPtr<BrowserClient> browserClient;
   CefRefPtr<CefBrowser> browser;
@@ -314,7 +348,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   }
 
   window_info.SetAsWindowless(0);
-  browserClient = new BrowserClient(renderHandler, audioHandler);
+  browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler);
 
   /* We create the browser outside of the lock because it will call the paint
    * callback synchronously */
