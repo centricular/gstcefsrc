@@ -139,7 +139,7 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   g_list_free_full (demux->cef_audio_stream_start_events, (GDestroyNotify) gst_event_unref);
   demux->cef_audio_stream_start_events = NULL;
 
-  while ((meta = gst_buffer_iterate_meta_filtered (buffer, &state, GST_CEF_AUDIO_META_API_TYPE))) {
+  while ((meta = gst_buffer_iterate_meta_filtered (buffer, &state, GST_CEF_AUDIO_META_API_TYPE)) != NULL) {
     AudioPushData push_data;
     GstCefAudioMeta *ameta = (GstCefAudioMeta *) meta;
     GstPad *srcpad = (GstPad *) g_hash_table_lookup (demux->asrcpads, GINT_TO_POINTER (ameta->stream_id));

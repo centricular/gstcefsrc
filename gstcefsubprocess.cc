@@ -18,10 +18,18 @@
  */
 
 #include <include/cef_app.h>
+#include <glib.h>
 
 int main(int argc, char * argv[])
 {
   CefSettings settings;
+
+#ifdef G_OS_WIN32
+  HINSTANCE hInstance = GetModuleHandle(NULL);
+  CefMainArgs args(hInstance);
+#else
   CefMainArgs args(argc, argv);
+#endif
+
   return CefExecuteProcess(args, nullptr, nullptr);
 }

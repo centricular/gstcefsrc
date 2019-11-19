@@ -55,6 +55,7 @@ class RenderHandler : public CefRenderHandler
 
     void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect &rect) override
     {
+	  GST_LOG_OBJECT(element, "getting view rect");
       GST_OBJECT_LOCK (element);
       rect = CefRect(0, 0, element->vinfo.width ? element->vinfo.width : DEFAULT_WIDTH, element->vinfo.height ? element->vinfo.height : DEFAULT_HEIGHT);
       GST_OBJECT_UNLOCK (element);
@@ -278,7 +279,14 @@ gst_cef_src_start(GstBaseSrc *base_src)
 {
   gboolean ret = FALSE;
   GstCefSrc *src = GST_CEF_SRC (base_src);
+
+#ifdef G_OS_WIN32
+  HINSTANCE hInstance = GetModuleHandle(NULL);
+  CefMainArgs args(hInstance);
+#else
   CefMainArgs args(0, NULL);
+#endif
+
   CefSettings settings;
   CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
   CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
