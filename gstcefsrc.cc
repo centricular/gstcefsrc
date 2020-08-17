@@ -116,7 +116,7 @@ class AudioHandler : public CefAudioHandler
   public:
 
     AudioHandler(GstCefSrc *element) :
-        element (element)
+        mElement (element)
     {
     }
 
@@ -125,28 +125,25 @@ class AudioHandler : public CefAudioHandler
     }
 
   void OnAudioStreamStarted(CefRefPtr<CefBrowser> browser,
-                            int audio_stream_id,
-                            int channels,
-                            ChannelLayout channel_layout,
-                            int sample_rate,
-                            int frames_per_buffer) override
+                            const CefAudioParameters& params,
+                            int channels) override
   {
     GstStructure *s = gst_structure_new ("cef-audio-stream-start",
-        "id", G_TYPE_INT, audio_stream_id,
         "channels", G_TYPE_INT, channels,
-        "rate", G_TYPE_INT, sample_rate,
+        "rate", G_TYPE_INT, params.sample_rate,
         NULL);
     GstEvent *event = gst_event_new_custom (GST_EVENT_CUSTOM_DOWNSTREAM, s);
 
-    GST_OBJECT_LOCK (element);
-    element->audio_events = g_list_append (element->audio_events, event);
-    GST_OBJECT_UNLOCK (element);
+    mRate = params.sample_rate;
+    mChannels = channels;
+    mCurrentTime = GST_CLOCK_TIME_NONE;
 
-    streamChannels.insert(std::make_pair(audio_stream_id, channels));
+    GST_OBJECT_LOCK (mElement);
+    mElement->audio_events = g_list_append (mElement->audio_events, event);
+    GST_OBJECT_UNLOCK (mElement);
   }
 
   void OnAudioStreamPacket(CefRefPtr<CefBrowser> browser,
-                           int audio_stream_id,
                            const float** data,
                            int frames,
                            int64_t pts) override
@@ -154,56 +151,57 @@ class AudioHandler : public CefAudioHandler
     GstBuffer *buf;
     GstMapInfo info;
     gint i, j;
-    int channels;
-    GstBufferList *buffers;
 
-    channels = streamChannels[audio_stream_id];
+    GST_LOG_OBJECT (mElement, "Handling audio stream packet with %d frames", frames);
 
-    GST_LOG_OBJECT (element, "Handling audio stream packet with %d frames", frames);
-
-    buf = gst_buffer_new_allocate (NULL, channels * frames * 4, NULL);
+    buf = gst_buffer_new_allocate (NULL, mChannels * frames * 4, NULL);
 
     gst_buffer_map (buf, &info, GST_MAP_WRITE);
-    for (i = 0; i < channels; i++) {
+    for (i = 0; i < mChannels; i++) {
       gfloat *cdata = (gfloat *) data[i];
 
       for (j = 0; j < frames; j++) {
-        memcpy (info.data + j * 4 * channels + i * 4, &cdata[j], 4);
+        memcpy (info.data + j * 4 * mChannels + i * 4, &cdata[j], 4);
       }
     }
     gst_buffer_unmap (buf, &info);
 
-    GST_OBJECT_LOCK (element);
-    if (!g_hash_table_contains (element->audio_buffers, GINT_TO_POINTER (audio_stream_id))) {
-      buffers = gst_buffer_list_new ();
-      g_hash_table_insert (element->audio_buffers, GINT_TO_POINTER (audio_stream_id), buffers);
-    } else {
-      buffers = (GstBufferList *) g_hash_table_lookup (element->audio_buffers, GINT_TO_POINTER (audio_stream_id));
+    GST_OBJECT_LOCK (mElement);
+
+    if (!GST_CLOCK_TIME_IS_VALID (mCurrentTime)) {
+      mCurrentTime = gst_util_uint64_scale (mElement->n_frames,
+          mElement->vinfo.fps_d * GST_SECOND, mElement->vinfo.fps_n);
     }
 
-    gst_buffer_list_add (buffers, buf);
-    GST_OBJECT_UNLOCK (element);
+    GST_BUFFER_PTS (buf) = mCurrentTime;
+    GST_BUFFER_DURATION (buf) = gst_util_uint64_scale (frames, GST_SECOND, mRate);
+    mCurrentTime += GST_BUFFER_DURATION (buf);
 
-    GST_LOG_OBJECT (element, "Handled audio stream packet");
+    if (!mElement->audio_buffers) {
+      mElement->audio_buffers = gst_buffer_list_new();
+    }
+
+    gst_buffer_list_add (mElement->audio_buffers, buf);
+    GST_OBJECT_UNLOCK (mElement);
+
+    GST_LOG_OBJECT (mElement, "Handled audio stream packet");
   }
 
-  void OnAudioStreamStopped(CefRefPtr<CefBrowser> browser,
-                            int audio_stream_id) override
+  void OnAudioStreamStopped(CefRefPtr<CefBrowser> browser) override
   {
-    GstStructure *s = gst_structure_new ("cef-audio-stream-stop",
-        "id", G_TYPE_INT, audio_stream_id,
-        NULL);
-    GstEvent *event = gst_event_new_custom (GST_EVENT_CUSTOM_DOWNSTREAM, s);
+  }
 
-    GST_OBJECT_LOCK (element);
-    element->audio_events = g_list_append (element->audio_events, event);
-    GST_OBJECT_UNLOCK (element);
+  void OnAudioStreamError(CefRefPtr<CefBrowser> browser,
+                          const CefString& message) override {
+    GST_WARNING_OBJECT (mElement, "Audio stream error: %s", message.ToString().c_str());
   }
 
   private:
 
-    GstCefSrc *element;
-    std::map<int, int> streamChannels;
+    GstCefSrc *mElement;
+    GstClockTime mCurrentTime;
+    gint mRate;
+    gint mChannels;
     IMPLEMENT_REFCOUNTING(AudioHandler);
 };
 
@@ -271,14 +269,6 @@ cef_do_work_func(GstCefSrc *src)
   return G_SOURCE_CONTINUE;
 }
 
-static gboolean
-gst_cef_src_add_audio_meta (gint stream_id, GstBufferList *buffers, GstBuffer *buf)
-{
-  gst_buffer_add_cef_audio_meta (buf, gst_buffer_list_ref (buffers), stream_id);
-
-  return TRUE;
-}
-
 static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
 {
   GstCefSrc *src = GST_CEF_SRC (push_src);
@@ -298,7 +288,10 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
   g_assert (src->current_buffer);
   *buf = gst_buffer_copy (src->current_buffer);
 
-  g_hash_table_foreach_remove (src->audio_buffers, (GHRFunc) gst_cef_src_add_audio_meta, *buf);
+  if (src->audio_buffers) {
+    gst_buffer_add_cef_audio_meta (*buf, src->audio_buffers);
+    src->audio_buffers = NULL;
+  }
 
   GST_BUFFER_PTS (*buf) = gst_util_uint64_scale (src->n_frames, src->vinfo.fps_d * GST_SECOND, src->vinfo.fps_n);
   GST_BUFFER_DURATION (*buf) = gst_util_uint64_scale (GST_SECOND, src->vinfo.fps_d, src->vinfo.fps_n);
@@ -515,8 +508,10 @@ gst_cef_src_finalize (GObject *object)
 {
   GstCefSrc *src = GST_CEF_SRC (object);
 
-  g_hash_table_unref (src->audio_buffers);
-  src->audio_buffers = NULL;
+  if (src->audio_buffers) {
+    gst_buffer_list_unref (src->audio_buffers);
+    src->audio_buffers = NULL;
+  }
 
   g_list_free_full (src->audio_events, (GDestroyNotify) gst_event_unref);
   src->audio_events = NULL;
@@ -529,7 +524,7 @@ gst_cef_src_init (GstCefSrc * src)
 
   src->n_frames = 0;
   src->current_buffer = NULL;
-  src->audio_buffers = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, (GDestroyNotify) gst_buffer_list_unref);
+  src->audio_buffers = NULL;
   src->audio_events = NULL;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);

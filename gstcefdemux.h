@@ -28,11 +28,12 @@ struct _GstCefDemux {
   gboolean need_caps;
   gboolean need_segment;
   GstPad *vsrcpad;
+  GstPad *asrcpad;
   GHashTable *asrcpads;
   GList *cef_audio_stream_start_events;
-  GList *cef_audio_stream_stop_events;
   GstEvent *vcaps_event;
   GstFlowCombiner *flow_combiner;
+  GstClockTime last_audio_time;
 };
 
 struct _GstCefDemuxClass {

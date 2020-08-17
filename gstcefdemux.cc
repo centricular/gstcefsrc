@@ -23,9 +23,9 @@ GST_STATIC_PAD_TEMPLATE ("video",
 );
 
 static GstStaticPadTemplate gst_cef_demux_audio_src_template =
-GST_STATIC_PAD_TEMPLATE ("audio_%d",
+GST_STATIC_PAD_TEMPLATE ("audio",
     GST_PAD_SRC,
-    GST_PAD_SOMETIMES,
+    GST_PAD_ALWAYS,
     GST_STATIC_CAPS (CEF_AUDIO_CAPS)
 );
 
@@ -38,13 +38,29 @@ gst_cef_demux_push_events (GstCefDemux *demux)
   if (demux->need_stream_start) {
     event = gst_event_new_stream_start ("cefvideo");
     gst_pad_push_event (demux->vsrcpad, event);
+    event = gst_event_new_stream_start ("cefaudio");
+    gst_pad_push_event (demux->asrcpad, event);
     demux->need_stream_start = FALSE;
   }
 
   if (demux->need_caps) {
+    GstCaps *audio_caps;
+
     g_assert (demux->vcaps_event);
     gst_pad_push_event (demux->vsrcpad, demux->vcaps_event);
     demux->vcaps_event = NULL;
+
+    /* Push some dummy caps so that our initial gap events don't
+     * get refused */
+    audio_caps = gst_caps_new_simple ("audio/x-raw",
+        "format", G_TYPE_STRING, "F32BE",
+        "rate", G_TYPE_INT, 44100,
+        "channels", G_TYPE_INT, 2,
+        "layout", G_TYPE_STRING, "interleaved",
+        NULL);
+    gst_pad_push_event (demux->asrcpad, gst_event_new_caps (audio_caps));
+    gst_caps_unref (audio_caps);
+
     demux->need_caps = FALSE;
   }
 
@@ -52,6 +68,8 @@ gst_cef_demux_push_events (GstCefDemux *demux)
     gst_segment_init (&segment, GST_FORMAT_TIME);
     event = gst_event_new_segment (&segment);
     gst_pad_push_event (demux->vsrcpad, event);
+    event = gst_event_new_segment (&segment);
+    gst_pad_push_event (demux->asrcpad, event);
     demux->need_segment = FALSE;
   }
 
@@ -60,7 +78,7 @@ gst_cef_demux_push_events (GstCefDemux *demux)
 
 typedef struct
 {
-  GstPad *srcpad;
+  GstCefDemux *demux;
   GstFlowCombiner *flow_combiner;
   GstFlowReturn combined;
 } AudioPushData;
@@ -68,40 +86,22 @@ typedef struct
 static gboolean
 gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *push_data)
 {
-  push_data->combined = gst_flow_combiner_update_pad_flow (push_data->flow_combiner, push_data->srcpad,
-      gst_pad_push (push_data->srcpad, *buffer));
+  push_data->combined = gst_flow_combiner_update_pad_flow (push_data->flow_combiner, push_data->demux->asrcpad,
+      gst_pad_push (push_data->demux->asrcpad, *buffer));
+  push_data->demux->last_audio_time = GST_BUFFER_PTS (*buffer) + GST_BUFFER_DURATION (*buffer);
   *buffer = NULL;
   return TRUE;
 }
 
 static void
-gst_cef_demux_expose_audio_stream (GstCefDemux *demux, const GstStructure *s)
+gst_cef_demux_update_audio_caps (GstCefDemux *demux, const GstStructure *s)
 {
   GstCaps *caps;
-  GstSegment segment;
   GstEvent *event;
-  GstPad *srcpad;
-  gchar *name;
-  gint id, channels, rate;
+  gint channels, rate;
 
-  gst_structure_get_int (s, "id", &id);
   gst_structure_get_int (s, "channels", &channels);
   gst_structure_get_int (s, "rate", &rate);
-
-  name = g_strdup_printf ("audio_%d", id);
-
-  srcpad = gst_pad_new_from_static_template (&gst_cef_demux_audio_src_template, name);
-  g_free (name);
-
-  gst_element_add_pad (GST_ELEMENT (demux), srcpad);
-  gst_flow_combiner_add_pad (demux->flow_combiner, srcpad);
-
-  g_hash_table_insert (demux->asrcpads, GINT_TO_POINTER (id), srcpad);
-
-  name = g_strdup_printf ("cefaudio_%d", id);
-  event = gst_event_new_stream_start (name);
-  g_free (name);
-  gst_pad_push_event (srcpad, event);
 
   caps = gst_caps_new_simple ("audio/x-raw",
       "format", G_TYPE_STRING, "F32LE",
@@ -111,12 +111,8 @@ gst_cef_demux_expose_audio_stream (GstCefDemux *demux, const GstStructure *s)
       "layout", G_TYPE_STRING, "interleaved",
       NULL);
   event = gst_event_new_caps (caps);
-  gst_pad_push_event (srcpad, event);
+  gst_pad_push_event (demux->asrcpad, event);
   gst_caps_unref (caps);
-
-  gst_segment_init (&segment, GST_FORMAT_TIME);
-  event = gst_event_new_segment (&segment);
-  gst_pad_push_event (srcpad, event);
 }
 
 static GstFlowReturn
@@ -133,7 +129,7 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   for (tmp = demux->cef_audio_stream_start_events; tmp; tmp = tmp->next) {
     const GstStructure *s = gst_event_get_structure ((GstEvent *) tmp->data);
 
-    gst_cef_demux_expose_audio_stream (demux, s);
+    gst_cef_demux_update_audio_caps (demux, s);
   }
 
   g_list_free_full (demux->cef_audio_stream_start_events, (GDestroyNotify) gst_event_unref);
@@ -142,9 +138,8 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   while ((meta = gst_buffer_iterate_meta_filtered (buffer, &state, GST_CEF_AUDIO_META_API_TYPE)) != NULL) {
     AudioPushData push_data;
     GstCefAudioMeta *ameta = (GstCefAudioMeta *) meta;
-    GstPad *srcpad = (GstPad *) g_hash_table_lookup (demux->asrcpads, GINT_TO_POINTER (ameta->stream_id));
 
-    push_data.srcpad = srcpad;
+    push_data.demux = demux;
     push_data.flow_combiner = demux->flow_combiner;
     gst_buffer_list_foreach (ameta->buffers, (GstBufferListFunc) gst_cef_demux_push_audio_buffer, &push_data);
     if (push_data.combined != GST_FLOW_OK) {
@@ -156,26 +151,18 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   ret = gst_flow_combiner_update_pad_flow (demux->flow_combiner, demux->vsrcpad,
       gst_pad_push (demux->vsrcpad, buffer));
 
-  if (ret != GST_FLOW_OK)
-    goto done;
+  if (demux->last_audio_time < GST_BUFFER_PTS (buffer)) {
+    GstEvent *gap;
 
-  for (tmp = demux->cef_audio_stream_stop_events; tmp; tmp = tmp->next) {
-    const GstStructure *s = gst_event_get_structure ((GstEvent *) tmp->data);
-    gint id;
-    GstPad *srcpad;
-    GstEvent *event;
+    gap = gst_event_new_gap (demux->last_audio_time, GST_BUFFER_PTS (buffer) - demux->last_audio_time);
 
-    gst_structure_get_int (s, "id", &id);
-    srcpad = (GstPad *) g_hash_table_lookup (demux->asrcpads, GINT_TO_POINTER (id));
-    event = gst_event_new_eos ();
-    gst_pad_push_event (srcpad, event);
-    gst_element_remove_pad (GST_ELEMENT (demux), srcpad);
-    gst_flow_combiner_remove_pad (demux->flow_combiner, srcpad);
-    g_hash_table_remove (demux->asrcpads, GINT_TO_POINTER (id));
+    gst_pad_push_event (demux->asrcpad, gap);
+
+    demux->last_audio_time = GST_BUFFER_PTS (buffer);
   }
 
-  g_list_free_full (demux->cef_audio_stream_stop_events, (GDestroyNotify) gst_event_unref);
-  demux->cef_audio_stream_stop_events = NULL;
+  if (ret != GST_FLOW_OK)
+    goto done;
 
 done:
   return ret;
@@ -193,9 +180,6 @@ gst_cef_demux_sink_event (GstPad *pad, GstObject *parent, GstEvent *event)
 
       if (gst_structure_has_name (s, "cef-audio-stream-start")) {
         demux->cef_audio_stream_start_events = g_list_append (demux->cef_audio_stream_start_events, event);
-        event = NULL;
-      } else if (gst_structure_has_name (s, "cef-audio-stream-stop")) {
-        demux->cef_audio_stream_stop_events = g_list_append (demux->cef_audio_stream_stop_events, event);
         event = NULL;
       }
       break;
@@ -220,6 +204,7 @@ gst_cef_demux_init (GstCefDemux * demux)
   GstPad *sinkpad = gst_pad_new_from_static_template (&gst_cef_demux_sink_template, "sink");;
 
   demux->vsrcpad = gst_pad_new_from_static_template (&gst_cef_demux_video_src_template, "video");
+  demux->asrcpad = gst_pad_new_from_static_template (&gst_cef_demux_audio_src_template, "audio");
 
   gst_pad_set_chain_function (sinkpad, gst_cef_demux_chain);
   gst_pad_set_event_function (sinkpad, gst_cef_demux_sink_event);
@@ -229,11 +214,14 @@ gst_cef_demux_init (GstCefDemux * demux)
 
   gst_element_add_pad (GST_ELEMENT (demux), demux->vsrcpad);
   gst_flow_combiner_add_pad (demux->flow_combiner, demux->vsrcpad);
+  gst_element_add_pad (GST_ELEMENT (demux), demux->asrcpad);
+  gst_flow_combiner_add_pad (demux->flow_combiner, demux->asrcpad);
 
   demux->pushed_events = FALSE;
   demux->need_stream_start = TRUE;
   demux->need_caps = TRUE;
   demux->need_segment = TRUE;
+  demux->last_audio_time = 0;
   demux->asrcpads = g_hash_table_new (g_direct_hash, g_direct_equal);
 }
 
@@ -245,8 +233,6 @@ gst_cef_demux_finalize (GObject *object)
   g_hash_table_unref (demux->asrcpads);
   g_list_free_full (demux->cef_audio_stream_start_events, (GDestroyNotify) gst_event_unref);
   demux->cef_audio_stream_start_events = NULL;
-  g_list_free_full (demux->cef_audio_stream_stop_events, (GDestroyNotify) gst_event_unref);
-  demux->cef_audio_stream_stop_events = NULL;
   gst_flow_combiner_free (demux->flow_combiner);
 }
 

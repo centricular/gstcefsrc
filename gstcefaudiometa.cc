@@ -22,7 +22,7 @@ gst_cef_audio_meta_free (GstMeta * meta, GstBuffer * buffer)
 }
 
 GstCefAudioMeta *
-gst_buffer_add_cef_audio_meta (GstBuffer * buffer, GstBufferList *buffers, gint stream_id)
+gst_buffer_add_cef_audio_meta (GstBuffer * buffer, GstBufferList *buffers)
 {
   GstCefAudioMeta *ameta;
 
@@ -30,7 +30,6 @@ gst_buffer_add_cef_audio_meta (GstBuffer * buffer, GstBufferList *buffers, gint 
       (GstCefAudioMeta *) gst_buffer_add_meta (buffer, GST_CEF_AUDIO_META_INFO, NULL);
 
   ameta->buffers = buffers;
-  ameta->stream_id = stream_id;
 
   return ameta;
 }

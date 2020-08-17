@@ -31,7 +31,7 @@ typedef struct _GstCefSrcClass GstCefSrcClass;
 struct _GstCefSrc {
   GstPushSrc parent;
   GstBuffer *current_buffer;
-  GHashTable *audio_buffers;
+  GstBufferList *audio_buffers;
   GList *audio_events;
   GstVideoInfo vinfo;
   guint64 n_frames;

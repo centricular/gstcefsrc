@@ -21,7 +21,6 @@ typedef struct _GstCefAudioMeta GstCefAudioMeta;
 struct _GstCefAudioMeta {
   GstMeta      meta;
   GstBufferList *buffers;
-  gint stream_id;
 };
 
 GSTCEF_EXPORT
@@ -33,7 +32,7 @@ const GstMetaInfo * gst_cef_audio_meta_get_info (void);
 #define gst_buffer_get_cef_audio_meta(b) ((GstCefAudioMeta*)gst_buffer_get_meta((b), GST_CEF_AUDIO_META_API_TYPE))
 
 GSTCEF_EXPORT
-GstCefAudioMeta * gst_buffer_add_cef_audio_meta (GstBuffer *buffer, GstBufferList *buffers, gint stream_id);
+GstCefAudioMeta * gst_buffer_add_cef_audio_meta (GstBuffer *buffer, GstBufferList *buffers);
 
 G_END_DECLS
 
