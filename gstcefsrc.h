@@ -39,6 +39,10 @@ struct _GstCefSrc {
   gchar *url;
   CefRefPtr<CefBrowser> browser;
   CefRefPtr<CefApp> app;
+
+  GCond start_cond;
+  GMutex start_lock;
+  gboolean started;
 };
 
 struct _GstCefSrcClass {

@@ -8,6 +8,8 @@
 #include <include/cef_life_span_handler.h>
 #include <include/cef_load_handler.h>
 #include <include/wrapper/cef_helpers.h>
+#include <include/base/cef_bind.h>
+#include <include/wrapper/cef_closure_task.h>
 
 #include "gstcefsrc.h"
 #include "gstcefaudiometa.h"
@@ -20,6 +22,11 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define DEFAULT_FPS_N 30
 #define DEFAULT_FPS_D 1
 #define DEFAULT_URL "https://www.google.com"
+
+static gboolean cef_inited = FALSE;
+static gboolean init_result = FALSE;
+static GMutex init_lock;
+static GCond init_cond;
 
 enum
 {
@@ -209,10 +216,11 @@ class BrowserClient : public CefClient
 {
   public:
 
-    BrowserClient(CefRefPtr<CefRenderHandler> rptr, CefRefPtr<CefAudioHandler> aptr, CefRefPtr<CefRequestHandler> rqptr) :
+    BrowserClient(CefRefPtr<CefRenderHandler> rptr, CefRefPtr<CefAudioHandler> aptr, CefRefPtr<CefRequestHandler> rqptr, GstCefSrc *element) :
         render_handler(rptr),
         audio_handler(aptr),
-        request_handler(rqptr)
+        request_handler(rqptr),
+        mElement (element)
     {
     }
 
@@ -231,14 +239,38 @@ class BrowserClient : public CefClient
       return request_handler;
     }
 
+    void MakeBrowser(int);
+
   private:
 
     CefRefPtr<CefRenderHandler> render_handler;
     CefRefPtr<CefAudioHandler> audio_handler;
     CefRefPtr<CefRequestHandler> request_handler;
 
+  public:
+    GstCefSrc *mElement;
+
     IMPLEMENT_REFCOUNTING(BrowserClient);
 };
+
+void BrowserClient::MakeBrowser(int arg)
+{
+  CefWindowInfo window_info;
+  CefRefPtr<CefBrowser> browser;
+  CefBrowserSettings browser_settings;
+
+  window_info.SetAsWindowless(0);
+  browser = CefBrowserHost::CreateBrowserSync(window_info, this, std::string(mElement->url), browser_settings, nullptr, nullptr);
+
+  browser->GetHost()->SetAudioMuted(true);
+
+  mElement->browser = browser;
+
+  g_mutex_lock (&mElement->start_lock);
+  mElement->started = TRUE;
+  g_cond_signal (&mElement->start_cond);
+  g_mutex_unlock(&mElement->start_lock);
+}
 
 class App : public CefApp
 {
@@ -258,16 +290,6 @@ class App : public CefApp
  private:
   IMPLEMENT_REFCOUNTING(App);
 };
-
-static gboolean
-cef_do_work_func(GstCefSrc *src)
-{
-  GST_LOG_OBJECT (src, "Making CEF work");
-  CefDoMessageLoopWork();
-  GST_LOG_OBJECT (src, "Made CEF work");
-
-  return G_SOURCE_CONTINUE;
-}
 
 static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
 {
@@ -301,12 +323,16 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
   return GST_FLOW_OK;
 }
 
-static gboolean
-gst_cef_src_start(GstBaseSrc *base_src)
+/* Once we have started a first cefsrc for this process, we start
+ * a UI thread and never shut it down. We could probably refine this
+ * to stop and restart the thread as needed, but this updated approach
+ * now no longer requires a main loop to be running, doesn't crash
+ * when one is running either with CEF 86+, and allows for multiple
+ * concurrent cefsrc instances.
+ */
+static gpointer
+run_cef (gpointer unused)
 {
-  gboolean ret = FALSE;
-  GstCefSrc *src = GST_CEF_SRC (base_src);
-
 #ifdef G_OS_WIN32
   HINSTANCE hInstance = GetModuleHandle(NULL);
   CefMainArgs args(hInstance);
@@ -315,12 +341,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
 #endif
 
   CefSettings settings;
-  CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
-  CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
-  CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
   CefRefPtr<App> app;
-  CefRefPtr<BrowserClient> browserClient;
-  CefRefPtr<CefBrowser> browser;
   CefWindowInfo window_info;
   CefBrowserSettings browserSettings;
 
@@ -328,7 +349,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   settings.windowless_rendering_enabled = true;
   settings.log_severity = LOGSEVERITY_DISABLE;
 
-  GST_INFO_OBJECT  (src, "Starting up");
+  GST_INFO  ("Initializing CEF");
 
   /* FIXME: won't work installed */
   CefString(&settings.browser_subprocess_path).FromASCII(CEF_SUBPROCESS_PATH);
@@ -336,27 +357,77 @@ gst_cef_src_start(GstBaseSrc *base_src)
   app = new App();
 
   if (!CefInitialize(args, settings, app, nullptr)) {
-    GST_ERROR_OBJECT (src, "Failed to initialize CEF");
+    GST_ERROR ("Failed to initialize CEF");
+
+    /* unblock start () */
+    g_mutex_lock (&init_lock);
+    cef_inited = TRUE;
+    g_cond_signal(&init_cond);
+    g_mutex_unlock (&init_lock);
+
     goto done;
   }
 
-  window_info.SetAsWindowless(0);
-  browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler);
+  g_mutex_lock (&init_lock);
+  cef_inited = TRUE;
+  init_result = TRUE;
+  g_cond_signal(&init_cond);
+  g_mutex_unlock (&init_lock);
 
-  /* We create the browser outside of the lock because it will call the paint
-   * callback synchronously */
-  GST_INFO_OBJECT (src, "Creating browser with URL %s", src->url);
-  browser = CefBrowserHost::CreateBrowserSync(window_info, browserClient.get(), src->url, browserSettings, nullptr, nullptr);
+  CefRunMessageLoop();
 
-  browser->GetHost()->SetAudioMuted(true);
+done:
+  return NULL;
+}
+
+static gpointer
+init_cef (gpointer unused)
+{
+  g_mutex_init (&init_lock);
+  g_cond_init (&init_cond);
+
+  g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, NULL);
+
+  return NULL;
+}
+
+static gboolean
+gst_cef_src_start(GstBaseSrc *base_src)
+{
+  static GOnce init_once = G_ONCE_INIT;
+  gboolean ret = FALSE;
+  GstCefSrc *src = GST_CEF_SRC (base_src);
+  CefRefPtr<BrowserClient> browserClient;
+  CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
+  CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
+  CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
+
+  /* Initialize global variables */
+  g_once (&init_once, init_cef, NULL);
+
+  /* Make sure CEF is initialized before posting a task */
+  g_mutex_lock (&init_lock);
+  while (!cef_inited)
+    g_cond_wait (&init_cond, &init_lock);
+  g_mutex_unlock (&init_lock);
+
+  if (!init_result)
+    goto done;
 
   GST_OBJECT_LOCK (src);
-  src->browser = browser;
-  src->cef_work_id = g_timeout_add (5, (GSourceFunc) cef_do_work_func, src);
   src->n_frames = 0;
   GST_OBJECT_UNLOCK (src);
 
-  ret = TRUE;
+  browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler, src);
+  CefPostTask(TID_UI, base::Bind(&BrowserClient::MakeBrowser, browserClient.get(), 0));
+
+  /* And wait for this src's browser to have been created */
+  g_mutex_lock(&src->start_lock);
+  while (!src->started)
+    g_cond_wait (&src->start_cond, &src->start_lock);
+  g_mutex_unlock (&src->start_lock);
+
+  ret = src->browser != NULL;
 
 done:
   return ret;
@@ -369,13 +440,9 @@ gst_cef_src_stop (GstBaseSrc *base_src)
 
   GST_INFO_OBJECT (src, "Stopping");
 
-  GST_OBJECT_LOCK (src);
-  if (src->cef_work_id) {
-    g_source_remove (src->cef_work_id);
-    src->cef_work_id = 0;
-    CefShutdown();
-  }
-  GST_OBJECT_UNLOCK (src);
+  if (src->browser)
+    src->browser->GetHost()->CloseBrowser(true);
+  src->browser = NULL;
 
   return TRUE;
 }
@@ -515,6 +582,9 @@ gst_cef_src_finalize (GObject *object)
 
   g_list_free_full (src->audio_events, (GDestroyNotify) gst_event_unref);
   src->audio_events = NULL;
+
+  g_cond_clear(&src->start_cond);
+  g_mutex_clear(&src->start_lock);
 }
 
 static void
@@ -526,9 +596,13 @@ gst_cef_src_init (GstCefSrc * src)
   src->current_buffer = NULL;
   src->audio_buffers = NULL;
   src->audio_events = NULL;
+  src->started = FALSE;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
+
+  g_cond_init (&src->start_cond);
+  g_mutex_init (&src->start_lock);
 }
 
 static void
