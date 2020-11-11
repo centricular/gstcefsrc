@@ -353,6 +353,7 @@ run_cef (gpointer unused)
 
   /* FIXME: won't work installed */
   CefString(&settings.browser_subprocess_path).FromASCII(CEF_SUBPROCESS_PATH);
+  CefString(&settings.locales_dir_path).FromASCII(CEF_LOCALES_DIR);
 
   app = new App();
 
