@@ -40,8 +40,8 @@ struct _GstCefSrc {
   CefRefPtr<CefBrowser> browser;
   CefRefPtr<CefApp> app;
 
-  GCond start_cond;
-  GMutex start_lock;
+  GCond state_cond;
+  GMutex state_lock;
   gboolean started;
 };
 

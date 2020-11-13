@@ -212,7 +212,9 @@ class AudioHandler : public CefAudioHandler
     IMPLEMENT_REFCOUNTING(AudioHandler);
 };
 
-class BrowserClient : public CefClient
+class BrowserClient :
+  public CefClient,
+  public CefLifeSpanHandler
 {
   public:
 
@@ -222,6 +224,10 @@ class BrowserClient : public CefClient
         request_handler(rqptr),
         mElement (element)
     {
+    }
+
+    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
+        return this;
     }
 
     virtual CefRefPtr<CefRenderHandler> GetRenderHandler() override
@@ -239,7 +245,10 @@ class BrowserClient : public CefClient
       return request_handler;
     }
 
+    virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
+
     void MakeBrowser(int);
+    void CloseBrowser(int);
 
   private:
 
@@ -252,6 +261,14 @@ class BrowserClient : public CefClient
 
     IMPLEMENT_REFCOUNTING(BrowserClient);
 };
+
+void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
+  mElement->browser = NULL;
+  g_mutex_lock (&mElement->state_lock);
+  mElement->started = FALSE;
+  g_cond_signal (&mElement->state_cond);
+  g_mutex_unlock(&mElement->state_lock);
+}
 
 void BrowserClient::MakeBrowser(int arg)
 {
@@ -266,10 +283,15 @@ void BrowserClient::MakeBrowser(int arg)
 
   mElement->browser = browser;
 
-  g_mutex_lock (&mElement->start_lock);
+  g_mutex_lock (&mElement->state_lock);
   mElement->started = TRUE;
-  g_cond_signal (&mElement->start_cond);
-  g_mutex_unlock(&mElement->start_lock);
+  g_cond_signal (&mElement->state_cond);
+  g_mutex_unlock(&mElement->state_lock);
+}
+
+void BrowserClient::CloseBrowser(int arg)
+{
+  mElement->browser->GetHost()->CloseBrowser(true);
 }
 
 class App : public CefApp
@@ -377,9 +399,37 @@ run_cef (gpointer unused)
 
   CefRunMessageLoop();
 
+  CefShutdown();
+
+  g_mutex_lock (&init_lock);
+  cef_inited = FALSE;
+  g_cond_signal(&init_cond);
+  g_mutex_unlock (&init_lock);
+
 done:
   return NULL;
 }
+
+void quit_message_loop (int arg)
+{
+  CefQuitMessageLoop();
+}
+
+
+class ShutdownEnforcer {
+ public:
+  ~ShutdownEnforcer() {
+    if (!cef_inited)
+      return;
+
+    CefPostTask(TID_UI, base::Bind(&quit_message_loop, 0));
+
+    g_mutex_lock(&init_lock);
+    while (cef_inited)
+      g_cond_wait (&init_cond, &init_lock);
+    g_mutex_unlock (&init_lock);
+  }
+} shutdown_enforcer;
 
 static gpointer
 init_cef (gpointer unused)
@@ -423,10 +473,10 @@ gst_cef_src_start(GstBaseSrc *base_src)
   CefPostTask(TID_UI, base::Bind(&BrowserClient::MakeBrowser, browserClient.get(), 0));
 
   /* And wait for this src's browser to have been created */
-  g_mutex_lock(&src->start_lock);
+  g_mutex_lock(&src->state_lock);
   while (!src->started)
-    g_cond_wait (&src->start_cond, &src->start_lock);
-  g_mutex_unlock (&src->start_lock);
+    g_cond_wait (&src->state_cond, &src->state_lock);
+  g_mutex_unlock (&src->state_lock);
 
   ret = src->browser != NULL;
 
@@ -441,9 +491,15 @@ gst_cef_src_stop (GstBaseSrc *base_src)
 
   GST_INFO_OBJECT (src, "Stopping");
 
-  if (src->browser)
+  if (src->browser) {
     src->browser->GetHost()->CloseBrowser(true);
-  src->browser = NULL;
+
+    /* And wait for this src's browser to have been closed */
+    g_mutex_lock(&src->state_lock);
+    while (src->started)
+      g_cond_wait (&src->state_cond, &src->state_lock);
+    g_mutex_unlock (&src->state_lock);
+  }
 
   return TRUE;
 }
@@ -584,8 +640,8 @@ gst_cef_src_finalize (GObject *object)
   g_list_free_full (src->audio_events, (GDestroyNotify) gst_event_unref);
   src->audio_events = NULL;
 
-  g_cond_clear(&src->start_cond);
-  g_mutex_clear(&src->start_lock);
+  g_cond_clear(&src->state_cond);
+  g_mutex_clear(&src->state_lock);
 }
 
 static void
@@ -602,8 +658,8 @@ gst_cef_src_init (GstCefSrc * src)
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
 
-  g_cond_init (&src->start_cond);
-  g_mutex_init (&src->start_lock);
+  g_cond_init (&src->state_cond);
+  g_mutex_init (&src->state_lock);
 }
 
 static void
