@@ -23,6 +23,9 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define DEFAULT_FPS_D 1
 #define DEFAULT_URL "https://www.google.com"
 
+#define SOCKET_PORT = 3000
+#define SOCKET_HOST "localhost"
+
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
 static GMutex init_lock;
@@ -308,6 +311,7 @@ class App : public CefApp
     command_line->AppendSwitch("start-fullscreen");
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
     //command_line->AppendSwitch("disable-gpu-compositing");
+    
   }
 
  private:
@@ -479,6 +483,12 @@ gst_cef_src_start(GstBaseSrc *base_src)
     g_cond_wait (&src->state_cond, &src->state_lock);
   g_mutex_unlock (&src->state_lock);
 
+  src->keypressSocket = new Socket(AF_INET,SOCK_STREAM,0);
+  int optVal = 1;
+  src->keypressSocket->socket_set_opt(SOL_SOCKET, SO_REUSEADDR, &optVal); //You can reuse the address and the port
+  src->keypressSocket->bind(SOCKET_HOST, SOCKET_PORT);
+  src->keypressSocket->listen(1);
+
   ret = src->browser != NULL;
 
 done:
@@ -501,6 +511,8 @@ gst_cef_src_stop (GstBaseSrc *base_src)
       g_cond_wait (&src->state_cond, &src->state_lock);
     g_mutex_unlock (&src->state_lock);
   }
+  src->keypressSocket->socket_shutdown(2);
+  src->keypressSocket->close();
 
   return TRUE;
 }
