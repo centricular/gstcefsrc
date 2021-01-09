@@ -43,7 +43,7 @@ struct _GstCefSrc {
   GCond state_cond;
   GMutex state_lock;
   gboolean started;
-  Socket* keypressSocket
+  Socket* keypressSocket;
 };
 
 struct _GstCefSrcClass {

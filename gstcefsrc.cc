@@ -23,7 +23,7 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define DEFAULT_FPS_D 1
 #define DEFAULT_URL "https://www.google.com"
 
-#define SOCKET_PORT = 3000
+#define SOCKET_PORT "3000"
 #define SOCKET_HOST "localhost"
 
 static gboolean cef_inited = FALSE;
@@ -457,7 +457,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
   CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
   CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
-
+  int optVal = 1;
   /* Initialize global variables */
   g_once (&init_once, init_cef, NULL);
 
@@ -484,7 +484,6 @@ gst_cef_src_start(GstBaseSrc *base_src)
   g_mutex_unlock (&src->state_lock);
 
   src->keypressSocket = new Socket(AF_INET,SOCK_STREAM,0);
-  int optVal = 1;
   src->keypressSocket->socket_set_opt(SOL_SOCKET, SO_REUSEADDR, &optVal); //You can reuse the address and the port
   src->keypressSocket->bind(SOCKET_HOST, SOCKET_PORT);
   src->keypressSocket->listen(1);
