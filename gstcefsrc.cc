@@ -511,7 +511,7 @@ gst_cef_src_stop (GstBaseSrc *base_src)
     g_mutex_unlock (&src->state_lock);
   }
   src->keypressSocket->socket_shutdown(2);
-  src->keypressSocket->close();
+  //src->keypressSocket->close();
 
   return TRUE;
 }
