@@ -483,8 +483,6 @@ gst_cef_src_start(GstBaseSrc *base_src)
     g_cond_wait (&src->state_cond, &src->state_lock);
   g_mutex_unlock (&src->state_lock);
 
-  gst_pad_set_event_function()
-
   ret = src->browser != NULL;
 
 done:
