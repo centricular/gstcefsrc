@@ -654,7 +654,7 @@ gst_my_cef_src_event(GstPad *pad,
   GstObject *object,
   GstEvent *event)
   {
-    gboolean ret;
+    gboolean ret = TRUE;
     //GstCefSrc *src = GST_CEF_SRC (object);
     switch (GST_EVENT_TYPE (event)) {
       case GST_EVENT_NAVIGATION :
@@ -676,8 +676,8 @@ gst_cef_src_init (GstCefSrc * src)
 {
   GstBaseSrc *base_src = GST_BASE_SRC (src);
 
-  GstPad* pad src_pad = GST_BASE_SRC_PAD (src);
-  gst_pad_set_event_function(src_pad, gst_my_cef_src_event)
+  GstPad* src_pad = GST_BASE_SRC_PAD (src);
+  gst_pad_set_event_function(src_pad, gst_my_cef_src_event);
 
 
   src->n_frames = 0;
