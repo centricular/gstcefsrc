@@ -650,12 +650,12 @@ gst_cef_src_finalize (GObject *object)
 }
 
 static gboolean
-gst_my_filter_sink_event (GstPad *pad,
+gst_my_cef_src_event(GstPad *pad,
   GstObject *object,
   GstEvent *event)
   {
     gboolean ret;
-    GstCefSrc *src = GST_CEF_SRC (object);
+    //GstCefSrc *src = GST_CEF_SRC (object);
     switch (GST_EVENT_TYPE (event)) {
       case GST_EVENT_NAVIGATION :
         /* we should handle the format here */
@@ -676,7 +676,7 @@ gst_cef_src_init (GstCefSrc * src)
 {
   GstBaseSrc *base_src = GST_BASE_SRC (src);
 
-  pad* src_pad = GST_BASE_SRC_PAD src;
+  GstPad* pad src_pad = GST_BASE_SRC_PAD (src);
   gst_pad_set_event_function(src_pad, gst_my_cef_src_event)
 
 
