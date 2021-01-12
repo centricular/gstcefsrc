@@ -457,7 +457,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
   CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
   CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
-  int optVal = 1;
+
   /* Initialize global variables */
   g_once (&init_once, init_cef, NULL);
 
@@ -483,10 +483,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
     g_cond_wait (&src->state_cond, &src->state_lock);
   g_mutex_unlock (&src->state_lock);
 
-  src->keypressSocket = new Socket(AF_INET,SOCK_STREAM,0);
-  src->keypressSocket->socket_set_opt(SOL_SOCKET, SO_REUSEADDR, &optVal); //You can reuse the address and the port
-  src->keypressSocket->bind(SOCKET_HOST, SOCKET_PORT);
-  src->keypressSocket->listen(1);
+  gst_pad_set_event_function()
 
   ret = src->browser != NULL;
 
@@ -510,8 +507,6 @@ gst_cef_src_stop (GstBaseSrc *base_src)
       g_cond_wait (&src->state_cond, &src->state_lock);
     g_mutex_unlock (&src->state_lock);
   }
-  src->keypressSocket->socket_shutdown(2);
-  //src->keypressSocket->close();
 
   return TRUE;
 }
@@ -656,10 +651,36 @@ gst_cef_src_finalize (GObject *object)
   g_mutex_clear(&src->state_lock);
 }
 
+static gboolean
+gst_my_filter_sink_event (GstPad *pad,
+  GstObject *object,
+  GstEvent *event)
+  {
+    gboolean ret;
+    GstCefSrc *src = GST_CEF_SRC (object);
+    switch (GST_EVENT_TYPE (event)) {
+      case GST_EVENT_NAVIGATION :
+        /* we should handle the format here */
+        /* push the event downstream */
+        GST_INFO  ("Got Navigation Event");
+        break;
+      
+      default:
+        /* just call the default handler */
+        GST_INFO  ("Got onhandle event");
+      break;
+      }
+    return ret;
+}
+
 static void
 gst_cef_src_init (GstCefSrc * src)
 {
   GstBaseSrc *base_src = GST_BASE_SRC (src);
+
+  pad* src_pad = GST_BASE_SRC_PAD src;
+  gst_pad_set_event_function(src_pad, gst_my_cef_src_event)
+
 
   src->n_frames = 0;
   src->current_buffer = NULL;
