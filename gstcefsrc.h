@@ -10,7 +10,6 @@
 #include <include/cef_life_span_handler.h>
 #include <include/cef_load_handler.h>
 #include <include/wrapper/cef_helpers.h>
-#include "socket.h"
 
 G_BEGIN_DECLS
 
@@ -43,7 +42,6 @@ struct _GstCefSrc {
   GCond state_cond;
   GMutex state_lock;
   gboolean started;
-  Socket* keypressSocket;
 };
 
 struct _GstCefSrcClass {
