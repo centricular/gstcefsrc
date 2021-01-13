@@ -665,7 +665,7 @@ gst_my_cef_src_event(GstPad *pad,
       
       default:
         /* just call the default handler */
-        GST_INFO  ("Got onhandle event");
+        GST_INFO  ("Got unhandle event");
       break;
       }
     return ret;
@@ -674,6 +674,7 @@ gst_my_cef_src_event(GstPad *pad,
 static void
 gst_cef_src_init (GstCefSrc * src)
 {
+  ST_INFO  ("INIT");
   GstBaseSrc *base_src = GST_BASE_SRC (src);
 
   GstPad* src_pad = GST_BASE_SRC_PAD (src);
