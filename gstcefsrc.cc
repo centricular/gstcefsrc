@@ -674,7 +674,7 @@ gst_my_cef_src_event(GstPad *pad,
 static void
 gst_cef_src_init (GstCefSrc * src)
 {
-  ST_INFO  ("INIT");
+  GST_INFO  ("INIT");
   GstBaseSrc *base_src = GST_BASE_SRC (src);
 
   GstPad* src_pad = GST_BASE_SRC_PAD (src);
