@@ -376,7 +376,7 @@ run_cef (gpointer unused)
   settings.windowless_rendering_enabled = true;
   settings.log_severity = LOGSEVERITY_DISABLE;
 
-  GST_INFO  ("Initializing CEF");
+  v  ("Initializing CEF");
 
   /* FIXME: won't work installed */
   CefString(&settings.browser_subprocess_path).FromASCII(CEF_SUBPROCESS_PATH);
@@ -649,18 +649,35 @@ gst_cef_src_finalize (GObject *object)
   g_mutex_clear(&src->state_lock);
 }
 
+void handle_key_event(GstCefSrc *src, guint key){
+  CefKeyEvent kEvent;
+  kEvent.windows_key_code = key;
+  kEvent.type = KEYEVENT_RAWKEYDOWN;
+  src->browser->GetHost()->SendKeyEvent(kEvent);
+  kEvent.type = KEYEVENT_CHAR;
+  src->browser->GetHost()->SendKeyEvent(kEvent);
+}
+
 static gboolean
 gst_my_cef_src_event(GstPad *pad,
   GstObject *object,
   GstEvent *event)
   {
     gboolean ret = TRUE;
-    //GstCefSrc *src = GST_CEF_SRC (object);
+    GstCefSrc *src = GST_CEF_SRC (object);
     switch (GST_EVENT_TYPE (event)) {
       case GST_EVENT_NAVIGATION :
+      {
         /* we should handle the format here */
         /* push the event downstream */
         GST_INFO  ("Got Navigation Event");
+        GstStructure * nav = gst_event_get_structure(event);
+        guint key = 0;
+        if (gst_structure_get_int (nav,
+                          "Key", &key) == TRUE);
+        handle_key_event(src, key);
+      }
+
         break;
       
       default:
