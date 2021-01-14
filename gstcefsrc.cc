@@ -376,7 +376,7 @@ run_cef (gpointer unused)
   settings.windowless_rendering_enabled = true;
   settings.log_severity = LOGSEVERITY_DISABLE;
 
-  v  ("Initializing CEF");
+  GST_INFO  ("Initializing CEF");
 
   /* FIXME: won't work installed */
   CefString(&settings.browser_subprocess_path).FromASCII(CEF_SUBPROCESS_PATH);
@@ -663,7 +663,7 @@ gst_my_cef_src_event(GstPad *pad,
   GstObject *object,
   GstEvent *event)
   {
-    gboolean ret = TRUE;
+    gboolean ret = FALSE;
     GstCefSrc *src = GST_CEF_SRC (object);
     switch (GST_EVENT_TYPE (event)) {
       case GST_EVENT_NAVIGATION :
@@ -671,14 +671,15 @@ gst_my_cef_src_event(GstPad *pad,
         /* we should handle the format here */
         /* push the event downstream */
         GST_INFO  ("Got Navigation Event");
-        GstStructure * nav = gst_event_get_structure(event);
+        const GstStructure * nav = gst_event_get_structure(event);
         guint key = 0;
-        if (gst_structure_get_int (nav,
+        if (gst_structure_get_uint (nav,
                           "Key", &key) == TRUE);
         handle_key_event(src, key);
+        ret = TRUE;
       }
 
-        break;
+      break;
       
       default:
         /* just call the default handler */
