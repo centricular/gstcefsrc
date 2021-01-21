@@ -7,6 +7,7 @@
 #include <include/cef_render_handler.h>
 #include <include/cef_life_span_handler.h>
 #include <include/cef_load_handler.h>
+#include <include//wrapper/cef_message_router.h>
 #include <include/wrapper/cef_helpers.h>
 #include <include/base/cef_bind.h>
 #include <include/wrapper/cef_closure_task.h>
@@ -22,9 +23,6 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define DEFAULT_FPS_N 30
 #define DEFAULT_FPS_D 1
 #define DEFAULT_URL "https://www.google.com"
-
-#define SOCKET_PORT "3000"
-#define SOCKET_HOST "localhost"
 
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
@@ -215,9 +213,35 @@ class AudioHandler : public CefAudioHandler
     IMPLEMENT_REFCOUNTING(AudioHandler);
 };
 
+// Handle messages in the browser process.
+class MessageHandler : public CefMessageRouterBrowserSide::Handler {
+public:
+    
+    MessageHandler() {}
+    // Called due to cefQuery execution in message_router.html.
+    bool OnQuery(CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        int64 query_id,
+        const CefString& request,
+        bool persistent,
+        CefRefPtr<Callback> callback) OVERRIDE {
+        // Only handle messages from the startup URL.
+        const std::string& message_str = request;
+        GST_ERROR("OnQuery %s", message_str.c_str());
+        std::string result = "success";
+        callback->Success(result);
+        return true;
+    }
+
+private:
+
+    DISALLOW_COPY_AND_ASSIGN(MessageHandler);
+};
+
 class BrowserClient :
   public CefClient,
-  public CefLifeSpanHandler
+  public CefLifeSpanHandler,
+  public CefRequestHandler
 {
   public:
 
@@ -250,14 +274,32 @@ class BrowserClient :
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
 
+    virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
+
+    // CefRequestHandler methods:
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        CefRefPtr<CefRequest> request,
+        bool user_gesture,
+        bool is_redirect) override ;
     void MakeBrowser(int);
     void CloseBrowser(int);
+
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        CefProcessId source_process,
+        CefRefPtr<CefProcessMessage> message) override;
+
+    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+        TerminationStatus status) override;
 
   private:
 
     CefRefPtr<CefRenderHandler> render_handler;
     CefRefPtr<CefAudioHandler> audio_handler;
     CefRefPtr<CefRequestHandler> request_handler;
+    CefRefPtr<CefMessageRouterBrowserSide> message_router_;
+    scoped_ptr<CefMessageRouterBrowserSide::Handler> message_handler_;
 
   public:
     GstCefSrc *mElement;
@@ -271,6 +313,11 @@ void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   mElement->started = FALSE;
   g_cond_signal (&mElement->state_cond);
   g_mutex_unlock(&mElement->state_lock);
+
+  // Free the router when the last browser is closed.
+  message_router_->RemoveHandler(message_handler_.get());
+  message_handler_.reset();
+  message_router_ = NULL;
 }
 
 void BrowserClient::MakeBrowser(int arg)
@@ -297,25 +344,117 @@ void BrowserClient::CloseBrowser(int arg)
   mElement->browser->GetHost()->CloseBrowser(true);
 }
 
+void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (!message_router_) {
+        // Create the browser-side router for query handling.
+        CefMessageRouterConfig config;
+        config.js_query_function = "cefQuery";
+        config.js_cancel_function = "cefQueryCancel";
+        message_router_ = CefMessageRouterBrowserSide::Create(config);
+
+        // Register handlers with the router.
+        message_handler_.reset(new MessageHandler());
+        message_router_->AddHandler(message_handler_.get(), false);
+    }
+}
+
+bool BrowserClient::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    CefProcessId source_process,
+    CefRefPtr<CefProcessMessage> message) {
+    CEF_REQUIRE_UI_THREAD();
+
+    return message_router_->OnProcessMessageReceived(browser, frame,
+        source_process, message);
+}
+
+bool BrowserClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefFrame> frame,
+    CefRefPtr<CefRequest> request,
+    bool user_gesture,
+    bool is_redirect) {
+    CEF_REQUIRE_UI_THREAD();
+
+    message_router_->OnBeforeBrowse(browser, frame);
+    return false;
+}
+
+void BrowserClient::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+    TerminationStatus status) {
+    CEF_REQUIRE_UI_THREAD();
+
+    message_router_->OnRenderProcessTerminated(browser);
+}
+
 class App : public CefApp
 {
   public:
-    App() {}
+      App() {}
 
   virtual void OnBeforeCommandLineProcessing(const CefString &process_type,
                                              CefRefPtr<CefCommandLine> command_line) override
   {
     command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
     command_line->AppendSwitch("enable-media-stream");
-    //command_line->AppendSwitch("disable-gpu");
-    command_line->AppendSwitch("start-fullscreen");
+//    command_line->AppendSwitch("disable-gpu");
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
-    //command_line->AppendSwitch("disable-gpu-compositing");
-    
+//    command_line->AppendSwitch("disable-gpu-compositing");
+    command_line->AppendSwitch("enable-shared-texture");
+    command_line->AppendSwitch("off-screen-rendering-enabled");
   }
 
  private:
   IMPLEMENT_REFCOUNTING(App);
+};
+
+// Implementation of CefApp for the renderer process.
+class RendererApp : public CefApp, public CefRenderProcessHandler {
+public:
+    RendererApp() { GST_ERROR("RendererApp"); }
+
+    // CefApp methods:
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() OVERRIDE {
+        return this;
+    }
+
+    // CefRenderProcessHandler methods:
+    void OnWebKitInitialized() OVERRIDE {
+        // Create the renderer-side router for query handling.
+        CefMessageRouterConfig config;
+        config.js_query_function = "cefQuery";
+        config.js_cancel_function = "cefQueryCancel";
+        message_router_ = CefMessageRouterRendererSide::Create(config);
+    }
+
+    void OnContextCreated(CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        CefRefPtr<CefV8Context> context) OVERRIDE {
+        message_router_->OnContextCreated(browser, frame, context);
+    }
+
+    void OnContextReleased(CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        CefRefPtr<CefV8Context> context) OVERRIDE {
+        message_router_->OnContextReleased(browser, frame, context);
+    }
+
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        CefProcessId source_process,
+        CefRefPtr<CefProcessMessage> message) OVERRIDE {
+        GST_ERROR("RendererApp OnProcessMessageReceived");
+        return message_router_->OnProcessMessageReceived(browser, frame,
+            source_process, message);
+    }
+
+private:
+    // Handles the renderer side of query routing.
+    CefRefPtr<CefMessageRouterRendererSide> message_router_;
+
+    IMPLEMENT_REFCOUNTING(RendererApp);
+    DISALLOW_COPY_AND_ASSIGN(RendererApp);
 };
 
 static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
@@ -350,6 +489,29 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
   return GST_FLOW_OK;
 }
 
+/*static gpointer
+keypress_cef (GstBaseSrc *base_src)
+{
+	GstCefSrc *src = GST_CEF_SRC (base_src);
+	sleep(5);
+	while (true)
+	{
+		CefKeyEvent kEvent;
+		kEvent.windows_key_code = 39;
+		kEvent.type = KEYEVENT_RAWKEYDOWN;
+		src->browser->GetHost()->SendKeyEvent(kEvent);
+                kEvent.type = KEYEVENT_CHAR;
+                src->browser->GetHost()->SendKeyEvent(kEvent);
+		sleep(2);
+		kEvent.windows_key_code = 40;
+                kEvent.type = KEYEVENT_RAWKEYDOWN;
+                src->browser->GetHost()->SendKeyEvent(kEvent);
+                kEvent.type = KEYEVENT_CHAR;
+                src->browser->GetHost()->SendKeyEvent(kEvent);
+		sleep(2);
+	}
+}*/
+
 /* Once we have started a first cefsrc for this process, we start
  * a UI thread and never shut it down. We could probably refine this
  * to stop and restart the thread as needed, but this updated approach
@@ -381,8 +543,10 @@ run_cef (gpointer unused)
   /* FIXME: won't work installed */
   CefString(&settings.browser_subprocess_path).FromASCII(CEF_SUBPROCESS_PATH);
   CefString(&settings.locales_dir_path).FromASCII(CEF_LOCALES_DIR);
-
+  
   app = new App();
+
+  
 
   if (!CefInitialize(args, settings, app, nullptr)) {
     GST_ERROR ("Failed to initialize CEF");
@@ -415,6 +579,43 @@ done:
   return NULL;
 }
 
+
+/* Once we have started a first cefsrc for this process, we start
+ * a UI thread and never shut it down. We could probably refine this
+ * to stop and restart the thread as needed, but this updated approach
+ * now no longer requires a main loop to be running, doesn't crash
+ * when one is running either with CEF 86+, and allows for multiple
+ * concurrent cefsrc instances.
+ */
+static gpointer
+run_cef_renderer(gpointer unused)
+{
+#ifdef G_OS_WIN32
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    CefMainArgs args(hInstance);
+#else
+    CefMainArgs args(0, NULL);
+#endif
+
+    CefRefPtr<RendererApp> rendererApp;
+    
+
+    rendererApp = new RendererApp();
+   
+
+    int exit_code = CefExecuteProcess(args, rendererApp, nullptr);
+    GST_ERROR("exit code %d", exit_code);
+
+    
+
+    CefRunMessageLoop();
+
+    CefShutdown();
+
+   
+    return NULL;
+}
+
 void quit_message_loop (int arg)
 {
   CefQuitMessageLoop();
@@ -443,6 +644,7 @@ init_cef (gpointer unused)
   g_cond_init (&init_cond);
 
   g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, NULL);
+  g_thread_new("cef-renderer-thread", (GThreadFunc)run_cef-renderer, NULL);
 
   return NULL;
 }
@@ -454,6 +656,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   gboolean ret = FALSE;
   GstCefSrc *src = GST_CEF_SRC (base_src);
   CefRefPtr<BrowserClient> browserClient;
+  
   CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
   CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
   CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
@@ -474,7 +677,10 @@ gst_cef_src_start(GstBaseSrc *base_src)
   src->n_frames = 0;
   GST_OBJECT_UNLOCK (src);
 
+  //g_thread_new("cef-keypress-thread", (GThreadFunc) keypress_cef, base_src);
+
   browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler, src);
+
   CefPostTask(TID_UI, base::Bind(&BrowserClient::MakeBrowser, browserClient.get(), 0));
 
   /* And wait for this src's browser to have been created */
@@ -663,23 +869,22 @@ gst_my_cef_src_event(GstPad *pad,
   GstObject *object,
   GstEvent *event)
   {
-    gboolean ret = FALSE;
+    gboolean ret = TRUE;
     GstCefSrc *src = GST_CEF_SRC (object);
     switch (GST_EVENT_TYPE (event)) {
       case GST_EVENT_NAVIGATION :
       {
         /* we should handle the format here */
         /* push the event downstream */
-        GST_INFO  ("Got Navigation Event");
+        GST_ERROR  ("Got Navigation Event");
         const GstStructure * nav = gst_event_get_structure(event);
         guint key = 0;
-        if (gst_structure_get_uint (nav,
-                          "Key", &key) == TRUE);
-        handle_key_event(src, key);
-        ret = TRUE;
+        if (gst_structure_get_uint (nav,"Key", &key) == TRUE)
+	        handle_key_event(src, key);
+	GST_ERROR("Keycode %d", key);
       }
 
-      break;
+        break;
       
       default:
         /* just call the default handler */
@@ -697,7 +902,6 @@ gst_cef_src_init (GstCefSrc * src)
 
   GstPad* src_pad = GST_BASE_SRC_PAD (src);
   gst_pad_set_event_function(src_pad, gst_my_cef_src_event);
-
 
   src->n_frames = 0;
   src->current_buffer = NULL;
