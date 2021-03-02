@@ -1,0 +1,39 @@
+name: gstcefsrc pull request test
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    name: Run gstcefsrc tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Get latest CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get install --yes libgstreamer1.0-0 libgstreamer-plugins-base1.0-dev
+
+      - name: Cache
+        id: cache-cmake
+        uses: actions/cache@v2
+        with:
+          path: |
+            build/
+            third_party/
+          key: ${{ hashFiles('cmake/DownloadCEF.cmake') }}-${{ hashFiles('CMakeLists.txt') }}-cache
+
+      - name: cmake
+        if: steps.cache-cmake.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build && cd build
+          cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
+
+      - name: make
+        run: |
+          cd build
+          make -j
