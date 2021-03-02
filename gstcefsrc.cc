@@ -307,6 +307,7 @@ class App : public CefApp
     command_line->AppendSwitch("disable-gpu");
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
     command_line->AppendSwitch("disable-gpu-compositing");
+    command_line->AppendSwitch("enable-begin-frame-scheduling"); /* https://bitbucket.org/chromiumembedded/cef/issues/1368 */
   }
 
  private:
