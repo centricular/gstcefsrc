@@ -22,6 +22,7 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define DEFAULT_FPS_N 30
 #define DEFAULT_FPS_D 1
 #define DEFAULT_URL "https://www.google.com"
+#define DEFAULT_GPU FALSE
 
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
@@ -32,6 +33,7 @@ enum
 {
   PROP_0,
   PROP_URL,
+  PROP_GPU,
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -297,21 +299,28 @@ void BrowserClient::CloseBrowser(int arg)
 class App : public CefApp
 {
   public:
-    App() {}
+    App(GstCefSrc *src) : src(src)
+    {
+    }
 
   virtual void OnBeforeCommandLineProcessing(const CefString &process_type,
                                              CefRefPtr<CefCommandLine> command_line) override
   {
     command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
     command_line->AppendSwitch("enable-media-stream");
-    command_line->AppendSwitch("disable-gpu");
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
-    command_line->AppendSwitch("disable-gpu-compositing");
     command_line->AppendSwitch("enable-begin-frame-scheduling"); /* https://bitbucket.org/chromiumembedded/cef/issues/1368 */
+
+    if (!src->gpu) {
+      // Optimize for no gpu usage
+      command_line->AppendSwitch("disable-gpu");
+      command_line->AppendSwitch("disable-gpu-compositing");
+    }
   }
 
  private:
   IMPLEMENT_REFCOUNTING(App);
+  GstCefSrc *src;
 };
 
 static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
@@ -354,7 +363,7 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
  * concurrent cefsrc instances.
  */
 static gpointer
-run_cef (gpointer unused)
+run_cef (GstCefSrc *src)
 {
 #ifdef G_OS_WIN32
   HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -378,7 +387,7 @@ run_cef (gpointer unused)
   CefString(&settings.browser_subprocess_path).FromASCII(CEF_SUBPROCESS_PATH);
   CefString(&settings.locales_dir_path).FromASCII(CEF_LOCALES_DIR);
 
-  app = new App();
+  app = new App(src);
 
   if (!CefInitialize(args, settings, app, nullptr)) {
     GST_ERROR ("Failed to initialize CEF");
@@ -433,12 +442,12 @@ class ShutdownEnforcer {
 } shutdown_enforcer;
 
 static gpointer
-init_cef (gpointer unused)
+init_cef (gpointer src)
 {
   g_mutex_init (&init_lock);
   g_cond_init (&init_cond);
 
-  g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, NULL);
+  g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, src);
 
   return NULL;
 }
@@ -455,7 +464,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
 
   /* Initialize global variables */
-  g_once (&init_once, init_cef, NULL);
+  g_once (&init_once, init_cef, src);
 
   /* Make sure CEF is initialized before posting a task */
   g_mutex_lock (&init_lock);
@@ -606,6 +615,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->url = g_strdup (url);
       break;
     }
+    case PROP_GPU:
+    {
+      src->gpu = g_value_get_boolean (value);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -621,6 +635,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
   switch (prop_id) {
     case PROP_URL:
       g_value_set_string (value, src->url);
+      break;
+    case PROP_GPU:
+      g_value_set_boolean (value, src->gpu);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -679,6 +696,11 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
       g_param_spec_string ("url", "url",
           "The URL to display",
           DEFAULT_URL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
+
+  g_object_class_install_property (gobject_class, PROP_GPU,
+    g_param_spec_boolean ("gpu", "gpu",
+          "Enable GPU usage in chromium (Improves performance if you have GPU)",
+          DEFAULT_GPU, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
