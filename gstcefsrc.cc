@@ -604,6 +604,13 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       url = g_value_get_string (value);
       g_free (src->url);
       src->url = g_strdup (url);
+
+      g_mutex_lock(&src->state_lock);
+      if (src->started) {
+        src->browser->GetMainFrame()->LoadURL(src->url);
+      }
+      g_mutex_unlock(&src->state_lock);
+
       break;
     }
     default:
