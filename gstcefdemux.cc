@@ -188,12 +188,18 @@ gst_cef_demux_sink_event (GstPad *pad, GstObject *parent, GstEvent *event)
       demux->vcaps_event = event;
       demux->need_caps = TRUE;
       event = NULL;
+    /* We send our own */
+    case GST_EVENT_SEGMENT:
+    case GST_EVENT_STREAM_START:
+      gst_event_replace (&event, NULL);
+      break;
     default:
       break;
   }
 
-  if (event)
-    gst_event_unref (event);
+  if (event) {
+    gst_pad_event_default(pad, parent, event);
+  }
 
   return TRUE;
 }
