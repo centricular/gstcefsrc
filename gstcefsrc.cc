@@ -23,6 +23,7 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define DEFAULT_FPS_D 1
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
+#define DEFAULT_CHROMIUM_DEBUG_PORT -1
 
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
@@ -34,6 +35,7 @@ enum
   PROP_0,
   PROP_URL,
   PROP_GPU,
+  PROP_CHROMIUM_DEBUG_PORT,
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -315,6 +317,10 @@ class App : public CefApp
       // Optimize for no gpu usage
       command_line->AppendSwitch("disable-gpu");
       command_line->AppendSwitch("disable-gpu-compositing");
+    }
+
+    if (src->chromium_debug_port >= 0) {
+      command_line->AppendSwitchWithValue("remote-debugging-port", g_strdup_printf ("%i", src->chromium_debug_port));
     }
   }
 
@@ -627,6 +633,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->gpu = g_value_get_boolean (value);
       break;
     }
+    case PROP_CHROMIUM_DEBUG_PORT:
+    {
+      src->chromium_debug_port = g_value_get_int (value);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -645,6 +656,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
       break;
     case PROP_GPU:
       g_value_set_boolean (value, src->gpu);
+      break;
+    case PROP_CHROMIUM_DEBUG_PORT:
+      g_value_set_int (value, src->chromium_debug_port);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -679,6 +693,7 @@ gst_cef_src_init (GstCefSrc * src)
   src->audio_buffers = NULL;
   src->audio_events = NULL;
   src->started = FALSE;
+  src->chromium_debug_port = DEFAULT_CHROMIUM_DEBUG_PORT;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
@@ -708,6 +723,11 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
     g_param_spec_boolean ("gpu", "gpu",
           "Enable GPU usage in chromium (Improves performance if you have GPU)",
           DEFAULT_GPU, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_CHROMIUM_DEBUG_PORT,
+    g_param_spec_int ("chromium-debug-port", "chromium-debug-port",
+          "Set chromium debug port (-1 = disabled)", -1, G_MAXUINT16,
+          DEFAULT_CHROMIUM_DEBUG_PORT, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",

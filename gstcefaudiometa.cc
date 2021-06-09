@@ -37,7 +37,7 @@ gst_buffer_add_cef_audio_meta (GstBuffer * buffer, GstBufferList *buffers)
 GType
 gst_cef_audio_meta_api_get_type (void)
 {
-  static volatile GType type;
+  static GType type;
   static const gchar *tags[] = { NULL };
 
   if (g_once_init_enter (&type)) {
