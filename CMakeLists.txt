@@ -38,6 +38,7 @@ set(GSTCEF_SRCS
   gstcef.cc
   gstcefsrc.cc
   gstcefdemux.cc
+  gstcefbin.cc
   gstcefaudiometa.cc
 )
 

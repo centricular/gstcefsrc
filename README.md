@@ -43,3 +43,17 @@ This will work with sites with no audio as well
 run the previous commands with `xvfb-run`:
 
 `xvfb-run --server-args="-screen 0 1920x1080x60" gst-launch-1.0 ...`
+
+In addition, a wrapper bin is exposed, wrapping cefsrc and cefdemux, and
+handling `web` and `uri` protocols:
+
+``` shell
+GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
+    cefbin name=cef cefsrc::url="https://soundcloud.com/platform/sama" \
+    cef.video ! video/x-raw, width=1920, height=1080, framerate=60/1 ! videoconvert ! xvimagesink \
+    cef.audio ! audioconvert ! audiomixer ! autoaudiosink
+```
+
+``` shell
+gst-launch-1.0 playbin uri=web://www.soundcloud.com/platform/sama
+```

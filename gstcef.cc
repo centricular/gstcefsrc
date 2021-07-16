@@ -19,12 +19,14 @@
 
 #include "gstcefsrc.h"
 #include "gstcefdemux.h"
+#include "gstcefbin.h"
 
 static gboolean
 plugin_init(GstPlugin *plugin)
 {
   if (!gst_element_register (plugin, "cefsrc", GST_RANK_NONE, GST_TYPE_CEF_SRC) ||
-      !gst_element_register (plugin, "cefdemux", GST_RANK_NONE, GST_TYPE_CEF_DEMUX))
+      !gst_element_register (plugin, "cefdemux", GST_RANK_NONE, GST_TYPE_CEF_DEMUX) ||
+      !gst_element_register (plugin, "cefbin", GST_RANK_NONE, GST_TYPE_CEF_BIN))
     return FALSE;
 
   return TRUE;
