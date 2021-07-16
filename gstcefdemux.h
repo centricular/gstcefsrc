@@ -34,6 +34,7 @@ struct _GstCefDemux {
   GstEvent *vcaps_event;
   GstFlowCombiner *flow_combiner;
   GstClockTime last_audio_time;
+  GstClockTime ts_offset;
 };
 
 struct _GstCefDemuxClass {

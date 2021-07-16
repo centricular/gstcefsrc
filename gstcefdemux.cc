@@ -86,6 +86,7 @@ typedef struct
 static gboolean
 gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *push_data)
 {
+  GST_BUFFER_PTS (*buffer) += push_data->demux->ts_offset;
   push_data->combined = gst_flow_combiner_update_pad_flow (push_data->flow_combiner, push_data->demux->asrcpad,
       gst_pad_push (push_data->demux->asrcpad, *buffer));
   push_data->demux->last_audio_time = GST_BUFFER_PTS (*buffer) + GST_BUFFER_DURATION (*buffer);
@@ -125,6 +126,11 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   GstFlowReturn ret = GST_FLOW_OK;
 
   gst_cef_demux_push_events (demux);
+
+
+  if (!GST_CLOCK_TIME_IS_VALID (demux->ts_offset)) {
+    demux->ts_offset = GST_BUFFER_PTS (buffer);
+  }
 
   for (tmp = demux->cef_audio_stream_start_events; tmp; tmp = tmp->next) {
     const GstStructure *s = gst_event_get_structure ((GstEvent *) tmp->data);
@@ -247,6 +253,7 @@ gst_cef_demux_init (GstCefDemux * demux)
   demux->need_caps = TRUE;
   demux->need_segment = TRUE;
   demux->last_audio_time = 0;
+  demux->ts_offset = GST_CLOCK_TIME_NONE;
   demux->asrcpads = g_hash_table_new (g_direct_hash, g_direct_equal);
 }
 
