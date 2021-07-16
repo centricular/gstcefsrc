@@ -3,7 +3,7 @@
 #include "gstcefdemux.h"
 #include "gstcefaudiometa.h"
 
-#define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1]"
+#define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_AUDIO_CAPS "audio/x-raw, format=F32LE, rate=[1, 2147483647], channels=[1, 2147483647], layout=interleaved"
 
 G_DEFINE_TYPE (GstCefDemux, gst_cef_demux, GST_TYPE_ELEMENT);
