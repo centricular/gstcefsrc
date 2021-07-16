@@ -204,6 +204,24 @@ gst_cef_demux_sink_event (GstPad *pad, GstObject *parent, GstEvent *event)
   return TRUE;
 }
 
+static gboolean
+gst_cef_demux_sink_query (GstPad *pad, GstObject *parent, GstQuery *query)
+{
+  GstCefDemux *demux = (GstCefDemux *) parent;
+  gboolean ret;
+
+  switch (GST_QUERY_TYPE (query)) {
+    case GST_QUERY_CAPS:
+      ret = gst_pad_peer_query(demux->vsrcpad, query);
+      break;
+    default:
+      ret = gst_pad_query_default(pad, parent, query);
+      break;
+  }
+
+  return ret;
+}
+
 static void
 gst_cef_demux_init (GstCefDemux * demux)
 {
@@ -214,6 +232,7 @@ gst_cef_demux_init (GstCefDemux * demux)
 
   gst_pad_set_chain_function (sinkpad, gst_cef_demux_chain);
   gst_pad_set_event_function (sinkpad, gst_cef_demux_sink_event);
+  gst_pad_set_query_function (sinkpad, gst_cef_demux_sink_query);
   gst_element_add_pad (GST_ELEMENT (demux), sinkpad);
 
   demux->flow_combiner = gst_flow_combiner_new ();
