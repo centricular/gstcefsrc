@@ -8,6 +8,16 @@ cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
 
+## Build + install
+You can build for install using any path. If you install inside GStreamer plugin path there is no need to set `GST_PLUGIN_PATH` variable.
+
+```
+mkdir build && cd build
+cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/lib/x86_64-linux-gnu/gstreamer-1.0/cefsrc/ ..
+make
+make install
+```
+
 ## Run
 
 The element can then be tested with:
