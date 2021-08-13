@@ -51,6 +51,13 @@ GST_STATIC_PAD_TEMPLATE ("src",
     GST_STATIC_CAPS (CEF_VIDEO_CAPS)
     );
 
+gchar* get_plugin_base_path () {
+  GstPlugin *plugin = gst_registry_find_plugin(gst_registry_get(), "cef");
+  gchar* base_path = g_path_get_dirname(gst_plugin_get_filename(plugin));
+  gst_object_unref(plugin);
+  return base_path;
+}
+
 class RenderHandler : public CefRenderHandler
 {
   public:
@@ -389,9 +396,16 @@ run_cef (GstCefSrc *src)
 
   GST_INFO  ("Initializing CEF");
 
-  /* FIXME: won't work installed */
-  CefString(&settings.browser_subprocess_path).FromASCII(CEF_SUBPROCESS_PATH);
-  CefString(&settings.locales_dir_path).FromASCII(CEF_LOCALES_DIR);
+  gchar* base_path = get_plugin_base_path();
+  gchar* browser_subprocess_path = g_build_filename(base_path, "gstcefsubprocess", NULL);
+  gchar* locales_dir_path = g_build_filename(base_path, "locales", NULL);
+
+  CefString(&settings.browser_subprocess_path).FromASCII(browser_subprocess_path);
+  CefString(&settings.locales_dir_path).FromASCII(locales_dir_path);
+
+  g_free(base_path);
+  g_free(browser_subprocess_path);
+  g_free(locales_dir_path);
 
   app = new App(src);
 
