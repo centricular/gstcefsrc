@@ -6,6 +6,11 @@ project(gstcef)
 
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 
+if(POLICY CMP0074)
+    #policy for <PackageName>_ROOT variables
+    cmake_policy(SET CMP0074 NEW)
+endif()
+
 set(CEF_VERSION "88.2.9+g5c8711a+chromium-88.0.4324.182")
 set(CEF_ESCAPED_VERSION "88.2.9%2Bg5c8711a%2Bchromium-88.0.4324.182")
 
@@ -73,12 +78,19 @@ SET_LIBRARY_TARGET_PROPERTIES("gstcef")
 add_dependencies("gstcef" libcef_dll_wrapper)
 target_link_libraries("gstcef" libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS} ${GST_LIBRARIES})
 target_include_directories("gstcef" PUBLIC ${GST_INCLUDE_DIRS})
-target_compile_definitions("gstcef" PUBLIC "-DCEF_SUBPROCESS_PATH=\"$<TARGET_FILE:gstcefsubprocess>\"")
-target_compile_definitions("gstcef" PUBLIC "-DCEF_LOCALES_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/locales\"")
+
 set_target_properties("gstcef" PROPERTIES INSTALL_RPATH "$ORIGIN")
 set_target_properties("gstcef" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 set_target_properties("gstcef" PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CEF_TARGET_OUT_DIR})
 
-
 COPY_FILES("gstcef" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
 COPY_FILES("gstcef" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+
+install(
+  DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/
+  DESTINATION .
+)
+install(
+  TARGETS "gstcef" "gstcefsubprocess"
+  DESTINATION .
+)
