@@ -13,7 +13,7 @@ make
 The element can then be tested with:
 
 ``` shell
-GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
+GST_PLUGIN_PATH=$(pwd)/Release:$GST_PLUGIN_PATH gst-launch-1.0 \
     cefsrc url="https://soundcloud.com/platform/sama" ! \
     video/x-raw, width=1920, height=1080, framerate=60/1 ! cefdemux name=d d.video ! \
     queue max-size-bytes=0 max-size-buffers=0 max-size-time=3000000000 ! videoconvert ! \
@@ -25,7 +25,7 @@ GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
 Record website video + audio (with audiomixer)
 
 ``` shell
-GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 -e \
+GST_PLUGIN_PATH=$(pwd)/Release:$GST_PLUGIN_PATH gst-launch-1.0 -e \
     cefsrc url="https://soundcloud.com/platform/sama" ! \
     video/x-raw, width=1920, height=1080, framerate=60/1 ! \
     cefdemux name=demux ! queue ! videoconvert ! \
@@ -48,7 +48,7 @@ In addition, a wrapper bin is exposed, wrapping cefsrc and cefdemux, and
 handling `web` and `uri` protocols:
 
 ``` shell
-GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
+GST_PLUGIN_PATH=$(pwd)/Release:$GST_PLUGIN_PATH gst-launch-1.0 \
     cefbin name=cef cefsrc::url="https://soundcloud.com/platform/sama" \
     cef.video ! video/x-raw, width=1920, height=1080, framerate=60/1 ! videoconvert ! xvimagesink \
     cef.audio ! audioconvert ! audiomixer ! autoaudiosink
