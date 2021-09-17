@@ -397,6 +397,18 @@ run_cef (GstCefSrc *src)
   GST_INFO  ("Initializing CEF");
 
   gchar* base_path = get_plugin_base_path();
+
+  // If not absolute path append to current_dir
+  if (!g_path_is_absolute(base_path)) {
+    gchar* current_dir = g_get_current_dir();
+
+    gchar* old_base_path = base_path;
+    base_path = g_build_filename(current_dir, base_path, NULL);
+
+    g_free(current_dir);
+    g_free(old_base_path);
+  }
+
   gchar* browser_subprocess_path = g_build_filename(base_path, "gstcefsubprocess", NULL);
   gchar* locales_dir_path = g_build_filename(base_path, "locales", NULL);
 
