@@ -36,6 +36,7 @@ enum
   PROP_URL,
   PROP_GPU,
   PROP_CHROMIUM_DEBUG_PORT,
+  PROP_CHROME_EXTRA_FLAGS
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -328,6 +329,27 @@ class App : public CefApp
 
     if (src->chromium_debug_port >= 0) {
       command_line->AppendSwitchWithValue("remote-debugging-port", g_strdup_printf ("%i", src->chromium_debug_port));
+    }
+
+    if (src->chrome_extra_flags) {
+      gchar **flags_list = g_strsplit ((const gchar *) src->chrome_extra_flags, ",", -1);
+      guint i;
+
+      for (i = 0; i < g_strv_length (flags_list); i++) {
+        gchar **switch_value = g_strsplit ((const gchar *) flags_list[i], "=", -1);
+
+        if (g_strv_length (switch_value) > 1) {
+          GST_INFO_OBJECT (src, "Adding switch with value %s=%s", switch_value[0], switch_value[1]);
+          command_line->AppendSwitchWithValue (switch_value[0], switch_value[1]);
+        } else {
+          GST_INFO_OBJECT (src, "Adding flag %s", flags_list[i]);
+          command_line->AppendSwitch (flags_list[i]);
+        }
+
+        g_strfreev (switch_value);
+      }
+
+      g_strfreev (flags_list);
     }
   }
 
@@ -654,6 +676,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
 
       break;
     }
+    case PROP_CHROME_EXTRA_FLAGS: {
+      g_free (src->chrome_extra_flags);
+      src->chrome_extra_flags = g_value_dup_string (value);
+      break;
+    }
     case PROP_GPU:
     {
       src->gpu = g_value_get_boolean (value);
@@ -679,6 +706,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
   switch (prop_id) {
     case PROP_URL:
       g_value_set_string (value, src->url);
+      break;
+    case PROP_CHROME_EXTRA_FLAGS:
+      g_value_set_string (value, src->chrome_extra_flags);
       break;
     case PROP_GPU:
       g_value_set_boolean (value, src->gpu);
@@ -752,8 +782,15 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_CHROMIUM_DEBUG_PORT,
     g_param_spec_int ("chromium-debug-port", "chromium-debug-port",
-          "Set chromium debug port (-1 = disabled)", -1, G_MAXUINT16,
+          "Set chromium debug port (-1 = disabled) "
+          "deprecated: use chrome-extra-flags instead", -1, G_MAXUINT16,
           DEFAULT_CHROMIUM_DEBUG_PORT, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_CHROME_EXTRA_FLAGS,
+    g_param_spec_string ("chrome-extra-flags", "chrome-extra-flags",
+          "Comma delimiter flags to be passed into chrome "
+          "(Example: show-fps-counter,remote-debugging-port=9222)",
+          NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
