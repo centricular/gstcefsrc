@@ -9,7 +9,7 @@
 G_DEFINE_TYPE (GstCefDemux, gst_cef_demux, GST_TYPE_ELEMENT);
 
 static GstStaticPadTemplate gst_cef_demux_sink_template =
-GST_STATIC_PAD_TEMPLATE ("src",
+GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS (CEF_VIDEO_CAPS)
@@ -248,13 +248,11 @@ gst_cef_demux_init (GstCefDemux * demux)
   gst_element_add_pad (GST_ELEMENT (demux), demux->asrcpad);
   gst_flow_combiner_add_pad (demux->flow_combiner, demux->asrcpad);
 
-  demux->pushed_events = FALSE;
   demux->need_stream_start = TRUE;
   demux->need_caps = TRUE;
   demux->need_segment = TRUE;
   demux->last_audio_time = 0;
   demux->ts_offset = GST_CLOCK_TIME_NONE;
-  demux->asrcpads = g_hash_table_new (g_direct_hash, g_direct_equal);
 }
 
 static void
@@ -262,7 +260,6 @@ gst_cef_demux_finalize (GObject *object)
 {
   GstCefDemux *demux = GST_CEF_DEMUX (object);
 
-  g_hash_table_unref (demux->asrcpads);
   g_list_free_full (demux->cef_audio_stream_start_events, (GDestroyNotify) gst_event_unref);
   demux->cef_audio_stream_start_events = NULL;
   gst_flow_combiner_free (demux->flow_combiner);

@@ -23,13 +23,11 @@ typedef struct _GstCefDemuxClass GstCefDemuxClass;
 struct _GstCefDemux {
   GstElement parent;
 
-  gboolean pushed_events;
   gboolean need_stream_start;
   gboolean need_caps;
   gboolean need_segment;
   GstPad *vsrcpad;
   GstPad *asrcpad;
-  GHashTable *asrcpads;
   GList *cef_audio_stream_start_events;
   GstEvent *vcaps_event;
   GstFlowCombiner *flow_combiner;
