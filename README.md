@@ -8,6 +8,16 @@ cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
 
+## Windows
+
+```
+mkdir build && cd build
+cmake ..
+cmake --build .
+```
+
+Add Debug folder to Path and GST_PLUGIN_PATH environment variables.
+
 ## Run
 
 The element can then be tested with:
