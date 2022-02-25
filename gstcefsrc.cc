@@ -9,6 +9,7 @@
 #include <include/cef_load_handler.h>
 #include <include/wrapper/cef_helpers.h>
 #include <include/base/cef_bind.h>
+#include <include/base/cef_callback_helpers.h>
 #include <include/wrapper/cef_closure_task.h>
 
 #include "gstcefsrc.h"
@@ -275,7 +276,7 @@ class BrowserClient :
 };
 
 void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
-  mElement->browser = NULL;
+  mElement->browser = nullptr;
   g_mutex_lock (&mElement->state_lock);
   mElement->started = FALSE;
   g_cond_signal (&mElement->state_cond);
@@ -479,14 +480,13 @@ void quit_message_loop (int arg)
   CefQuitMessageLoop();
 }
 
-
 class ShutdownEnforcer {
  public:
   ~ShutdownEnforcer() {
     if (!cef_inited)
       return;
 
-    CefPostTask(TID_UI, base::Bind(&quit_message_loop, 0));
+    CefPostTask(TID_UI, base::BindOnce(&quit_message_loop, 0));
 
     g_mutex_lock(&init_lock);
     while (cef_inited)
@@ -534,7 +534,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   GST_OBJECT_UNLOCK (src);
 
   browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler, src);
-  CefPostTask(TID_UI, base::Bind(&BrowserClient::MakeBrowser, browserClient.get(), 0));
+  CefPostTask(TID_UI, base::BindOnce(&BrowserClient::MakeBrowser, browserClient.get(), 0));
 
   /* And wait for this src's browser to have been created */
   g_mutex_lock(&src->state_lock);
