@@ -25,6 +25,7 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
+#define DEFAULT_SANDBOX TRUE
 
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
@@ -37,7 +38,8 @@ enum
   PROP_URL,
   PROP_GPU,
   PROP_CHROMIUM_DEBUG_PORT,
-  PROP_CHROME_EXTRA_FLAGS
+  PROP_CHROME_EXTRA_FLAGS,
+  PROP_SANDBOX,
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -413,7 +415,7 @@ run_cef (GstCefSrc *src)
   CefWindowInfo window_info;
   CefBrowserSettings browserSettings;
 
-  settings.no_sandbox = true;
+  settings.no_sandbox = !src->sandbox;
   settings.windowless_rendering_enabled = true;
   settings.log_severity = LOGSEVERITY_DISABLE;
 
@@ -691,6 +693,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->chromium_debug_port = g_value_get_int (value);
       break;
     }
+    case PROP_SANDBOX:
+    {
+      src->sandbox = g_value_get_boolean (value);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -715,6 +722,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
       break;
     case PROP_CHROMIUM_DEBUG_PORT:
       g_value_set_int (value, src->chromium_debug_port);
+      break;
+    case PROP_SANDBOX:
+      g_value_set_boolean (value, src->sandbox);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -750,6 +760,7 @@ gst_cef_src_init (GstCefSrc * src)
   src->audio_events = NULL;
   src->started = FALSE;
   src->chromium_debug_port = DEFAULT_CHROMIUM_DEBUG_PORT;
+  src->sandbox = DEFAULT_SANDBOX;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
@@ -791,6 +802,11 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
           "Comma delimiter flags to be passed into chrome "
           "(Example: show-fps-counter,remote-debugging-port=9222)",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_SANDBOX,
+    g_param_spec_boolean ("sandbox", "sandbox",
+          "Toggle chromium sandboxing capabilities",
+          DEFAULT_SANDBOX, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
