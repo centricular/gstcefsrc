@@ -38,7 +38,7 @@ struct _GstCefSrc {
   gulong cef_work_id;
   gchar *url;
   gchar *chrome_extra_flags;
-
+  gchar *js_flags;
   gboolean gpu;
   gboolean sandbox;
   gint chromium_debug_port;

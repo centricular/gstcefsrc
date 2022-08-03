@@ -40,6 +40,7 @@ enum
   PROP_CHROMIUM_DEBUG_PORT,
   PROP_CHROME_EXTRA_FLAGS,
   PROP_SANDBOX,
+  PROP_JS_FLAGS,
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -440,6 +441,10 @@ run_cef (GstCefSrc *src)
   CefString(&settings.browser_subprocess_path).FromASCII(browser_subprocess_path);
   CefString(&settings.locales_dir_path).FromASCII(locales_dir_path);
 
+  if (src->js_flags != NULL) {
+    CefString(&settings.javascript_flags).FromASCII(src->js_flags);
+  }
+
   g_free(base_path);
   g_free(browser_subprocess_path);
   g_free(locales_dir_path);
@@ -698,6 +703,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->sandbox = g_value_get_boolean (value);
       break;
     }
+    case PROP_JS_FLAGS: {
+      g_free (src->js_flags);
+      src->js_flags = g_value_dup_string (value);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -726,6 +736,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
     case PROP_SANDBOX:
       g_value_set_boolean (value, src->sandbox);
       break;
+    case PROP_JS_FLAGS:
+      g_value_set_string(value, src->js_flags);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -745,6 +758,8 @@ gst_cef_src_finalize (GObject *object)
   g_list_free_full (src->audio_events, (GDestroyNotify) gst_event_unref);
   src->audio_events = NULL;
 
+  g_free (src->js_flags);
+
   g_cond_clear(&src->state_cond);
   g_mutex_clear(&src->state_lock);
 }
@@ -761,6 +776,7 @@ gst_cef_src_init (GstCefSrc * src)
   src->started = FALSE;
   src->chromium_debug_port = DEFAULT_CHROMIUM_DEBUG_PORT;
   src->sandbox = DEFAULT_SANDBOX;
+  src->js_flags = NULL;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
@@ -807,6 +823,12 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
     g_param_spec_boolean ("sandbox", "sandbox",
           "Toggle chromium sandboxing capabilities",
           DEFAULT_SANDBOX, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_JS_FLAGS,
+    g_param_spec_string ("js-flags", "js-flags",
+          "Space delimited JavaScript flags to be passed to Chromium "
+          "(Example: --noexpose_wasm --expose-gc)",
+          NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
