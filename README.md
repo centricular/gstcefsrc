@@ -45,7 +45,7 @@ run the previous commands with `xvfb-run`:
 `xvfb-run --server-args="-screen 0 1920x1080x60" gst-launch-1.0 ...`
 
 In addition, a wrapper bin is exposed, wrapping cefsrc and cefdemux, and
-handling `web` and `uri` protocols:
+handling `web+http`, `web+https` and `web+file` protocols:
 
 ``` shell
 GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
@@ -55,5 +55,5 @@ GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
 ```
 
 ``` shell
-gst-launch-1.0 playbin uri=web://www.soundcloud.com/platform/sama
+gst-launch-1.0 playbin uri=web+https://www.soundcloud.com/platform/sama
 ```

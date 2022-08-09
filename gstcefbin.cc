@@ -13,7 +13,7 @@ gst_cef_bin_uri_get_type (GType type)
 static const gchar *const *
 gst_cef_bin_get_protocols (GType type)
 {
-  static const gchar *protocols[] = { "web", "cef", NULL };
+  static const gchar *protocols[] = { "web+http", "web+https", "web+file", NULL };
 
   return protocols;
 }
@@ -36,11 +36,20 @@ gst_cef_bin_set_uri (GstURIHandler * handler, const gchar * uristr,
   gboolean res = TRUE;
   gchar *location;
   GstCefBin *self = GST_CEF_BIN (handler);
+  const gchar *protocol;
+  GstUri *uri;
 
-  location = gst_uri_get_location (uristr);
+  protocol = gst_uri_get_protocol (uristr);
+  g_return_val_if_fail (g_str_has_prefix (protocol, "web+"), FALSE);
+
+  uri = gst_uri_from_string (uristr);
+  gst_uri_set_scheme (uri, protocol + 4);
+
+  location = gst_uri_to_string (uri);
 
   g_object_set (self->cefsrc, "url", location, NULL);
 
+  gst_uri_unref (uri);
   g_free (location);
 
   return res;
