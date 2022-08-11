@@ -18,6 +18,8 @@
 GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define GST_CAT_DEFAULT cef_src_debug
 
+GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
+
 #define DEFAULT_WIDTH 1920
 #define DEFAULT_HEIGHT 1080
 #define DEFAULT_FPS_N 30
@@ -228,17 +230,55 @@ class AudioHandler : public CefAudioHandler
     IMPLEMENT_REFCOUNTING(AudioHandler);
 };
 
+class DisplayHandler : public CefDisplayHandler {
+public:
+  DisplayHandler(GstCefSrc *element) : mElement(element) {}
+
+  ~DisplayHandler() = default;
+
+  virtual bool OnConsoleMessage(CefRefPtr<CefBrowser>, cef_log_severity_t level, const CefString &message, const CefString &source, int line) override {
+    GstDebugLevel gst_level = GST_LEVEL_NONE;
+    switch (level) {
+    case LOGSEVERITY_DEFAULT:
+    case LOGSEVERITY_INFO:
+      gst_level = GST_LEVEL_INFO;
+      break;
+    case LOGSEVERITY_DEBUG:
+      gst_level = GST_LEVEL_DEBUG;
+      break;
+    case LOGSEVERITY_WARNING:
+      gst_level = GST_LEVEL_WARNING;
+      break;
+    case LOGSEVERITY_ERROR:
+    case LOGSEVERITY_FATAL:
+      gst_level = GST_LEVEL_ERROR;
+      break;
+    case LOGSEVERITY_DISABLE:
+      gst_level = GST_LEVEL_NONE;
+      break;
+    };
+    GST_CAT_LEVEL_LOG (cef_console_debug, gst_level, mElement, "%s:%d %s", source.ToString().c_str(), line,
+      message.ToString().c_str());
+    return false;
+  }
+
+private:
+  GstCefSrc *mElement;
+  IMPLEMENT_REFCOUNTING(DisplayHandler);
+};
+
 class BrowserClient :
   public CefClient,
   public CefLifeSpanHandler
 {
   public:
 
-    BrowserClient(CefRefPtr<CefRenderHandler> rptr, CefRefPtr<CefAudioHandler> aptr, CefRefPtr<CefRequestHandler> rqptr, GstCefSrc *element) :
+    BrowserClient(CefRefPtr<CefRenderHandler> rptr, CefRefPtr<CefAudioHandler> aptr, CefRefPtr<CefRequestHandler> rqptr, CefRefPtr<CefDisplayHandler> display_handler, GstCefSrc *element) :
         render_handler(rptr),
         audio_handler(aptr),
         request_handler(rqptr),
-        mElement (element)
+        display_handler(display_handler),
+        mElement(element)
     {
     }
 
@@ -261,6 +301,11 @@ class BrowserClient :
       return request_handler;
     }
 
+    virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override
+    {
+      return display_handler;
+    }
+
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
 
     void MakeBrowser(int);
@@ -271,6 +316,7 @@ class BrowserClient :
     CefRefPtr<CefRenderHandler> render_handler;
     CefRefPtr<CefAudioHandler> audio_handler;
     CefRefPtr<CefRequestHandler> request_handler;
+    CefRefPtr<CefDisplayHandler> display_handler;
 
   public:
     GstCefSrc *mElement;
@@ -523,6 +569,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
   CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
   CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
+  CefRefPtr<DisplayHandler> displayHandler = new DisplayHandler(src);
 
   /* Initialize global variables */
   g_once (&init_once, init_cef, src);
@@ -540,7 +587,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
   src->n_frames = 0;
   GST_OBJECT_UNLOCK (src);
 
-  browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler, src);
+  browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler, displayHandler, src);
   CefPostTask(TID_UI, base::BindOnce(&BrowserClient::MakeBrowser, browserClient.get(), 0));
 
   /* And wait for this src's browser to have been created */
@@ -848,4 +895,6 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
 
   GST_DEBUG_CATEGORY_INIT (cef_src_debug, "cefsrc", 0,
       "Chromium Embedded Framework Source");
+  GST_DEBUG_CATEGORY_INIT (cef_console_debug, "cefconsole", 0,
+      "Chromium Embedded Framework JS Console");
 }
