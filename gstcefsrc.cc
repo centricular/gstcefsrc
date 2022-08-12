@@ -21,12 +21,37 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
+#define DEFAULT_LOG_SEVERITY LOGSEVERITY_DISABLE
 #define DEFAULT_SANDBOX TRUE
 
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
 static GMutex init_lock;
 static GCond init_cond;
+
+#define GST_TYPE_CEF_LOG_SEVERITY_MODE \
+  (gst_cef_log_severity_mode_get_type ())
+
+
+static GType
+gst_cef_log_severity_mode_get_type (void)
+{
+  static GType type = 0;
+  static const GEnumValue values[] = {
+    {LOGSEVERITY_DEBUG, "debug / verbose cef log severity", "debug"},
+    {LOGSEVERITY_INFO, "info cef log severity", "info"},
+    {LOGSEVERITY_WARNING, "warning cef log severity", "warning"},
+    {LOGSEVERITY_ERROR, "error cef log severity", "error"},
+    {LOGSEVERITY_FATAL, "fatal cef log severity", "fatal"},
+    {LOGSEVERITY_DISABLE, "disable cef log severity", "disable"},
+    {0, NULL, NULL},
+  };
+
+  if (!type) {
+    type = g_enum_register_static ("GstCefLogSeverityMode", values);
+  }
+  return type;
+}
 
 enum
 {
@@ -37,6 +62,7 @@ enum
   PROP_CHROME_EXTRA_FLAGS,
   PROP_SANDBOX,
   PROP_JS_FLAGS,
+  PROP_LOG_SEVERITY,
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -458,7 +484,7 @@ run_cef (GstCefSrc *src)
 
   settings.no_sandbox = !src->sandbox;
   settings.windowless_rendering_enabled = true;
-  settings.log_severity = LOGSEVERITY_DISABLE;
+  settings.log_severity = src->log_severity;
 
   GST_INFO  ("Initializing CEF");
 
@@ -749,6 +775,10 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->js_flags = g_value_dup_string (value);
       break;
     }
+    case PROP_LOG_SEVERITY: {
+      src->log_severity = (cef_log_severity_t) g_value_get_enum (value);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -778,7 +808,10 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
       g_value_set_boolean (value, src->sandbox);
       break;
     case PROP_JS_FLAGS:
-      g_value_set_string(value, src->js_flags);
+      g_value_set_string (value, src->js_flags);
+      break;
+    case PROP_LOG_SEVERITY:
+      g_value_set_enum (value, src->log_severity);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -818,6 +851,7 @@ gst_cef_src_init (GstCefSrc * src)
   src->chromium_debug_port = DEFAULT_CHROMIUM_DEBUG_PORT;
   src->sandbox = DEFAULT_SANDBOX;
   src->js_flags = NULL;
+  src->log_severity = DEFAULT_LOG_SEVERITY;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
@@ -870,6 +904,12 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
           "Space delimited JavaScript flags to be passed to Chromium "
           "(Example: --noexpose_wasm --expose-gc)",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_LOG_SEVERITY,
+      g_param_spec_enum ("log-severity", "log-severity",
+          "CEF log severity level",
+          GST_TYPE_CEF_LOG_SEVERITY_MODE, DEFAULT_LOG_SEVERITY,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
