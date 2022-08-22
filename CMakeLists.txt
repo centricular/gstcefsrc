@@ -11,7 +11,10 @@ if(POLICY CMP0074)
     cmake_policy(SET CMP0074 NEW)
 endif()
 
-set(CEF_VERSION "103.0.9+gd0bbcbb+chromium-103.0.5060.114")
+if (NOT DEFINED CEF_VERSION)
+  set(CEF_VERSION "103.0.9+gd0bbcbb+chromium-103.0.5060.114")
+endif()
+
 STRING(REGEX REPLACE "\\+" "%2B" CEF_ESCAPED_VERSION ${CEF_VERSION})
 
 # Determine the platform.
