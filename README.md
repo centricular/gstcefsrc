@@ -8,6 +8,10 @@ cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
 
+### Optional CMake variables
+
+- `CEF_VERSION` allows to override the default CEF version
+
 ## Run
 
 The element can then be tested with:
