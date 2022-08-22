@@ -31,7 +31,8 @@ function(DownloadCEF platform version escaped_version download_dir)
       # Download the SHA1 hash for the binary distribution.
       message(STATUS "Downloading ${CEF_DOWNLOAD_PATH}.sha1...")
       file(DOWNLOAD "${CEF_DOWNLOAD_URL}.sha1" "${CEF_DOWNLOAD_PATH}.sha1")
-      file(READ "${CEF_DOWNLOAD_PATH}.sha1" CEF_SHA1)
+      file(READ "${CEF_DOWNLOAD_PATH}.sha1" CEF_SHA1_UNSTRIPPED)
+      string(STRIP "${CEF_SHA1_UNSTRIPPED}" CEF_SHA1)
 
       # Download the binary distribution and verify the hash.
       message(STATUS "Downloading ${CEF_DOWNLOAD_PATH}...")
