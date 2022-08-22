@@ -11,6 +11,8 @@ make
 ### Optional CMake variables
 
 - `CEF_VERSION` allows to override the default CEF version
+- `CEF_BUILDS_HOMEPAGE_URL` allows to configure the URL of the website hosting
+  CEF binaries. Default is https://cef-builds.spotifycdn.com
 
 ## Run
 
