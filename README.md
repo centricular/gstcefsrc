@@ -14,6 +14,16 @@ make
 - `CEF_BUILDS_HOMEPAGE_URL` allows to configure the URL of the website hosting
   CEF binaries. Default is https://cef-builds.spotifycdn.com
 
+### Third-party CEF builds
+
+The official CEF builds hosted by Spotify do not support patent-encumbered
+codecs such as H.264. If that is a feature you need in your project or for some
+reason you need to customize the Chromium build flags, you need to rebuild CEF
+yourself. Thankfully at least two projects can help you with that daunting task:
+
+- https://github.com/reinismu/cefbuild : Docker to build cef with all codecs
+- https://github.com/philn/cef-build-box : Semi-automatic and reproducible CEF build
+
 ## Run
 
 The element can then be tested with:
