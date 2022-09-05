@@ -502,9 +502,16 @@ run_cef (GstCefSrc *src)
   }
 
   gchar* browser_subprocess_path = g_build_filename(base_path, "gstcefsubprocess", NULL);
-  gchar* locales_dir_path = g_build_filename(base_path, "locales", NULL);
+  if (const gchar *custom_subprocess_path = g_getenv ("GST_CEF_SUBPROCESS_PATH")) {
+    g_setenv ("CEF_SUBPROCESS_PATH", browser_subprocess_path, TRUE);
+    g_free (browser_subprocess_path);
+    browser_subprocess_path = g_strdup (custom_subprocess_path);
+  }
 
   CefString(&settings.browser_subprocess_path).FromASCII(browser_subprocess_path);
+  g_free(browser_subprocess_path);
+
+  gchar *locales_dir_path = g_build_filename(base_path, "locales", NULL);
   CefString(&settings.locales_dir_path).FromASCII(locales_dir_path);
 
   if (src->js_flags != NULL) {
@@ -512,7 +519,6 @@ run_cef (GstCefSrc *src)
   }
 
   g_free(base_path);
-  g_free(browser_subprocess_path);
   g_free(locales_dir_path);
 
   app = new App(src);
