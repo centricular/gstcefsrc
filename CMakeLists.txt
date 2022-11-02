@@ -24,6 +24,9 @@ elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   if(CMAKE_SIZEOF_VOID_P MATCHES 8)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch")
       set(CEF_PLATFORM "linuxarm64")
+      # cef_variables doesn't handle linux/arm64 case yet. See
+      # https://bitbucket.org/chromiumembedded/cef/issues/3417/project-arch-detection-support-is-missing
+      set(PROJECT_ARCH "arm64")
     else()
       set(CEF_PLATFORM "linux64")
     endif()
