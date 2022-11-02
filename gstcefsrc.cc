@@ -63,6 +63,7 @@ enum
   PROP_SANDBOX,
   PROP_JS_FLAGS,
   PROP_LOG_SEVERITY,
+  PROP_CEF_CACHE_LOCATION,
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -518,6 +519,10 @@ run_cef (GstCefSrc *src)
     CefString(&settings.javascript_flags).FromASCII(src->js_flags);
   }
 
+  if (src->cef_cache_location != NULL) {
+    CefString(&settings.cache_path).FromASCII(src->cef_cache_location);
+  }
+
   g_free(base_path);
   g_free(locales_dir_path);
 
@@ -785,6 +790,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->log_severity = (cef_log_severity_t) g_value_get_enum (value);
       break;
     }
+    case PROP_CEF_CACHE_LOCATION: {
+      g_free (src->cef_cache_location);
+      src->cef_cache_location = g_value_dup_string (value);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -819,6 +829,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
     case PROP_LOG_SEVERITY:
       g_value_set_enum (value, src->log_severity);
       break;
+    case PROP_CEF_CACHE_LOCATION:
+      g_value_set_string (value, src->cef_cache_location);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -839,6 +852,7 @@ gst_cef_src_finalize (GObject *object)
   src->audio_events = NULL;
 
   g_free (src->js_flags);
+  g_free (src->cef_cache_location);
 
   g_cond_clear(&src->state_cond);
   g_mutex_clear(&src->state_lock);
@@ -858,6 +872,7 @@ gst_cef_src_init (GstCefSrc * src)
   src->sandbox = DEFAULT_SANDBOX;
   src->js_flags = NULL;
   src->log_severity = DEFAULT_LOG_SEVERITY;
+  src->cef_cache_location = NULL;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
@@ -916,6 +931,12 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
           "CEF log severity level",
           GST_TYPE_CEF_LOG_SEVERITY_MODE, DEFAULT_LOG_SEVERITY,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_CEF_CACHE_LOCATION,
+    g_param_spec_string ("cef-cache-location", "cef-cache-location",
+          "Cache location for CEF. Defaults to in memory cache. "
+          "(Example: /tmp/cef-cache/)",
+          NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
