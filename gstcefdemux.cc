@@ -64,6 +64,7 @@ gst_cef_demux_push_events (GstCefDemux *demux)
         "channels", G_TYPE_INT, 2,
         "layout", G_TYPE_STRING, "interleaved",
         NULL);
+    gst_audio_info_from_caps (&demux->audio_info, audio_caps);
     gst_pad_push_event (demux->asrcpad, gst_event_new_caps (audio_caps));
     gst_caps_unref (audio_caps);
 
@@ -144,10 +145,21 @@ gst_element_get_current_running_time (GstElement * element)
 static gboolean
 gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *push_data)
 {
-  GST_BUFFER_PTS (*buffer) += push_data->demux->ts_offset;
+  push_data->demux->last_audio_time = gst_element_get_current_running_time (GST_ELEMENT_CAST (push_data->demux));
+  GST_BUFFER_DTS (*buffer) = push_data->demux->last_audio_time;
+  GST_BUFFER_PTS (*buffer) = push_data->demux->last_audio_time;
+
+  gst_buffer_add_audio_meta (*buffer, &push_data->demux->audio_info, gst_buffer_get_size (*buffer), NULL);
+
+  GST_BUFFER_FLAG_UNSET (*buffer, GST_BUFFER_FLAG_DISCONT);
+  if (push_data->demux->need_discont) {
+    GST_BUFFER_FLAG_SET (*buffer, GST_BUFFER_FLAG_DISCONT);
+    push_data->demux->need_discont = FALSE;
+  }
+
   push_data->combined = gst_flow_combiner_update_pad_flow (push_data->flow_combiner, push_data->demux->asrcpad,
       gst_pad_push (push_data->demux->asrcpad, *buffer));
-  push_data->demux->last_audio_time = GST_BUFFER_PTS (*buffer) + GST_BUFFER_DURATION (*buffer);
+
   *buffer = NULL;
   return TRUE;
 }
@@ -185,11 +197,6 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
 
   gst_cef_demux_push_events (demux);
 
-
-  if (!GST_CLOCK_TIME_IS_VALID (demux->ts_offset)) {
-    demux->ts_offset = GST_BUFFER_PTS (buffer);
-  }
-
   for (tmp = demux->cef_audio_stream_start_events; tmp; tmp = tmp->next) {
     const GstStructure *s = gst_event_get_structure ((GstEvent *) tmp->data);
 
@@ -215,12 +222,18 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   ret = gst_flow_combiner_update_pad_flow (demux->flow_combiner, demux->vsrcpad,
       gst_pad_push (demux->vsrcpad, buffer));
 
-  if (demux->last_audio_time < GST_BUFFER_PTS (buffer)) {
-    GstEvent *gap;
+  if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time) || demux->last_audio_time < GST_BUFFER_PTS (buffer)) {
+    GstClockTime duration, timestamp;
 
-    gap = gst_event_new_gap (demux->last_audio_time, GST_BUFFER_PTS (buffer) - demux->last_audio_time);
+    if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time)) {
+      timestamp = GST_BUFFER_PTS (buffer);
+      duration = GST_BUFFER_DURATION (buffer);
+    } else {
+      timestamp = demux->last_audio_time;
+      duration = GST_BUFFER_PTS (buffer) - demux->last_audio_time;
+    }
 
-    gst_pad_push_event (demux->asrcpad, gap);
+    gst_pad_push_event (demux->asrcpad, gst_event_new_gap (timestamp, duration));
 
     demux->last_audio_time = GST_BUFFER_PTS (buffer);
   }
@@ -286,6 +299,30 @@ gst_cef_demux_sink_query (GstPad *pad, GstObject *parent, GstQuery *query)
   return ret;
 }
 
+static GstStateChangeReturn
+gst_cef_demux_change_state (GstElement * element, GstStateChange transition)
+{
+  GstStateChangeReturn result;
+  GstCefDemux *demux = (GstCefDemux *) element;
+
+  GST_DEBUG_OBJECT (element, "%s", gst_state_change_get_name (transition));
+  result = GST_CALL_PARENT_WITH_DEFAULT (GST_ELEMENT_CLASS , change_state, (element, transition), GST_STATE_CHANGE_FAILURE);
+
+  switch (transition) {
+  case GST_STATE_CHANGE_PAUSED_TO_READY:
+    gst_flow_combiner_reset (demux->flow_combiner);
+    break;
+  case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+    demux->need_discont = TRUE;
+    break;
+  default:
+    break;
+  }
+
+  return result;
+}
+
+
 static void
 gst_cef_demux_init (GstCefDemux * demux)
 {
@@ -306,11 +343,13 @@ gst_cef_demux_init (GstCefDemux * demux)
   gst_element_add_pad (GST_ELEMENT (demux), demux->asrcpad);
   gst_flow_combiner_add_pad (demux->flow_combiner, demux->asrcpad);
 
+  gst_audio_info_init (&demux->audio_info);
+
   demux->need_stream_start = TRUE;
   demux->need_caps = TRUE;
   demux->need_segment = TRUE;
-  demux->last_audio_time = 0;
-  demux->ts_offset = GST_CLOCK_TIME_NONE;
+  demux->need_discont = TRUE;
+  demux->last_audio_time = GST_CLOCK_TIME_NONE;
 }
 
 static void
@@ -330,6 +369,8 @@ gst_cef_demux_class_init (GstCefDemuxClass * klass)
   GstElementClass *gstelement_class = GST_ELEMENT_CLASS(klass);
 
   gobject_class->finalize = gst_cef_demux_finalize;
+
+  gstelement_class->change_state = gst_cef_demux_change_state;
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework demuxer", "Demuxer/Audio/Video",

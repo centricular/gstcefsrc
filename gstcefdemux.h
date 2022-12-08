@@ -3,6 +3,7 @@
 
 #include <gst/gst.h>
 #include <gst/base/gstflowcombiner.h>
+#include <gst/audio/audio.h>
 
 G_BEGIN_DECLS
 
@@ -26,13 +27,14 @@ struct _GstCefDemux {
   gboolean need_stream_start;
   gboolean need_caps;
   gboolean need_segment;
+  gboolean need_discont;
   GstPad *vsrcpad;
   GstPad *asrcpad;
   GList *cef_audio_stream_start_events;
   GstEvent *vcaps_event;
   GstFlowCombiner *flow_combiner;
   GstClockTime last_audio_time;
-  GstClockTime ts_offset;
+  GstAudioInfo audio_info;
 };
 
 struct _GstCefDemuxClass {
