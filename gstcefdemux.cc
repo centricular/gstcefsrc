@@ -6,7 +6,13 @@
 #define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_AUDIO_CAPS "audio/x-raw, format=F32LE, rate=[1, 2147483647], channels=[1, 2147483647], layout=interleaved"
 
-G_DEFINE_TYPE (GstCefDemux, gst_cef_demux, GST_TYPE_ELEMENT);
+#define GST_CAT_DEFAULT gst_cef_demux_debug
+GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
+
+#define gst_cef_demux_parent_class parent_class
+G_DEFINE_TYPE_WITH_CODE (GstCefDemux, gst_cef_demux, GST_TYPE_ELEMENT,
+                         GST_DEBUG_CATEGORY_INIT (gst_cef_demux_debug, "cefdemux", 0,
+                                                  "cefdemux element"););
 
 static GstStaticPadTemplate gst_cef_demux_sink_template =
 GST_STATIC_PAD_TEMPLATE ("sink",
