@@ -182,7 +182,6 @@ class AudioHandler : public CefAudioHandler
 
     mRate = params.sample_rate;
     mChannels = channels;
-    mCurrentTime = GST_CLOCK_TIME_NONE;
 
     GST_OBJECT_LOCK (mElement);
     mElement->audio_events = g_list_append (mElement->audio_events, event);
@@ -214,14 +213,7 @@ class AudioHandler : public CefAudioHandler
 
     GST_OBJECT_LOCK (mElement);
 
-    if (!GST_CLOCK_TIME_IS_VALID (mCurrentTime)) {
-      mCurrentTime = gst_util_uint64_scale (mElement->n_frames,
-          mElement->vinfo.fps_d * GST_SECOND, mElement->vinfo.fps_n);
-    }
-
-    GST_BUFFER_PTS (buf) = mCurrentTime;
     GST_BUFFER_DURATION (buf) = gst_util_uint64_scale (frames, GST_SECOND, mRate);
-    mCurrentTime += GST_BUFFER_DURATION (buf);
 
     if (!mElement->audio_buffers) {
       mElement->audio_buffers = gst_buffer_list_new();
@@ -245,7 +237,6 @@ class AudioHandler : public CefAudioHandler
   private:
 
     GstCefSrc *mElement;
-    GstClockTime mCurrentTime;
     gint mRate;
     gint mChannels;
     IMPLEMENT_REFCOUNTING(AudioHandler);
