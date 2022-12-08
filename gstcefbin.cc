@@ -113,6 +113,11 @@ gst_cef_bin_constructed (GObject *object)
   GstElement *cefsrc, *cefdemux, *vqueue, *aqueue;
   GstPad *srcpad;
 
+
+  gst_bin_set_suppressed_flags (GST_BIN_CAST (self),
+                                static_cast<GstElementFlags>(GST_ELEMENT_FLAG_SOURCE | GST_ELEMENT_FLAG_SINK));
+  GST_OBJECT_FLAG_SET (self, GST_ELEMENT_FLAG_SOURCE);
+
   cefsrc = gst_element_factory_make("cefsrc", "cefsrc");
   cefdemux = gst_element_factory_make("cefdemux", "cefdemux");
   vqueue = gst_element_factory_make("queue", "video-queue");
