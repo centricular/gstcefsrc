@@ -410,8 +410,14 @@ class App : public CefApp
         gchar **switch_value = g_strsplit ((const gchar *) flags_list[i], "=", -1);
 
         if (g_strv_length (switch_value) > 1) {
-          GST_INFO_OBJECT (src, "Adding switch with value %s=%s", switch_value[0], switch_value[1]);
-          command_line->AppendSwitchWithValue (switch_value[0], switch_value[1]);
+          gchar **args = g_strsplit ((const gchar *) switch_value[1], "|", -1);
+          gchar *value = g_strjoinv (",", args);
+          g_strfreev(args);
+
+          GST_INFO_OBJECT (src, "Adding switch with value %s=%s", switch_value[0], value);
+          command_line->AppendSwitchWithValue (switch_value[0], value);
+
+          g_free(value);
         } else {
           GST_INFO_OBJECT (src, "Adding flag %s", flags_list[i]);
           command_line->AppendSwitch (flags_list[i]);
