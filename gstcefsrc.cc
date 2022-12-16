@@ -259,27 +259,44 @@ public:
 
   virtual bool OnConsoleMessage(CefRefPtr<CefBrowser>, cef_log_severity_t level, const CefString &message, const CefString &source, int line) override {
     GstDebugLevel gst_level = GST_LEVEL_NONE;
+    gchar *severity = (gchar *) "unknown";
     switch (level) {
     case LOGSEVERITY_DEFAULT:
     case LOGSEVERITY_INFO:
       gst_level = GST_LEVEL_INFO;
+      severity = (gchar *) "info";
       break;
     case LOGSEVERITY_DEBUG:
       gst_level = GST_LEVEL_DEBUG;
+      severity = (gchar *) "debug";
       break;
     case LOGSEVERITY_WARNING:
       gst_level = GST_LEVEL_WARNING;
+      severity = (gchar *) "warning";
       break;
     case LOGSEVERITY_ERROR:
     case LOGSEVERITY_FATAL:
       gst_level = GST_LEVEL_ERROR;
+      severity = (gchar *) "error";
       break;
     case LOGSEVERITY_DISABLE:
       gst_level = GST_LEVEL_NONE;
+      severity = (gchar *) "none";
       break;
     };
+
+    GstMessage *m = gst_message_new_element (GST_OBJECT (mElement),
+        gst_structure_new ("cefconsole",
+            "level", G_TYPE_STRING, severity,
+            "msg", G_TYPE_STRING, message.ToString().c_str(),
+            "source", G_TYPE_STRING, source.ToString().c_str(),
+            "line", G_TYPE_INT, line,
+            NULL));
+    gst_element_post_message (GST_ELEMENT (mElement), m);
+
     GST_CAT_LEVEL_LOG (cef_console_debug, gst_level, mElement, "%s:%d %s", source.ToString().c_str(), line,
       message.ToString().c_str());
+
     return false;
   }
 
