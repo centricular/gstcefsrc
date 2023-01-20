@@ -19,7 +19,11 @@ STRING(REGEX REPLACE "\\+" "%2B" CEF_ESCAPED_VERSION ${CEF_VERSION})
 
 # Determine the platform.
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
-  set(CEF_PLATFORM "macosx64")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+    set(CEF_PLATFORM "macosarm64")
+  else()
+    set(CEF_PLATFORM "macosx64")
+  endif()
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   if(CMAKE_SIZEOF_VOID_P MATCHES 8)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch")
@@ -67,7 +71,11 @@ pkg_check_modules(GST REQUIRED gstreamer-1.0
                   gstreamer-video-1.0
                   gstreamer-audio-1.0)
 
-ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+if(USE_SANDBOX)
+  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_SANDBOX_LIB_DEBUG}" "${CEF_SANDBOX_LIB_RELEASE}")
+else()
+  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+endif()
 
 SET_CEF_TARGET_OUT_DIR()
 
