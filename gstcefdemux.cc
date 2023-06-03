@@ -65,7 +65,6 @@ gst_cef_demux_push_events (GstCefDemux *demux)
         "channels", G_TYPE_INT, 2,
         "layout", G_TYPE_STRING, "interleaved",
         NULL);
-    gst_audio_info_from_caps (&demux->audio_info, audio_caps);
     gst_pad_push_event (demux->asrcpad, gst_event_new_caps (audio_caps));
     gst_caps_unref (audio_caps);
 
@@ -149,10 +148,6 @@ gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *p
   push_data->demux->last_audio_time = gst_element_get_current_running_time (GST_ELEMENT_CAST (push_data->demux));
   GST_BUFFER_DTS (*buffer) = push_data->demux->last_audio_time;
   GST_BUFFER_PTS (*buffer) = push_data->demux->last_audio_time;
-
-  gst_buffer_add_audio_meta (*buffer, &push_data->demux->audio_info, 
-                             gst_buffer_get_size (*buffer) / GST_AUDIO_INFO_BPF (&push_data->demux->audio_info), 
-                             NULL);
 
   GST_BUFFER_FLAG_UNSET (*buffer, GST_BUFFER_FLAG_DISCONT);
   if (push_data->demux->need_discont) {
@@ -347,8 +342,6 @@ gst_cef_demux_init (GstCefDemux * demux)
   gst_flow_combiner_add_pad (demux->flow_combiner, demux->vsrcpad);
   gst_element_add_pad (GST_ELEMENT (demux), demux->asrcpad);
   gst_flow_combiner_add_pad (demux->flow_combiner, demux->asrcpad);
-
-  gst_audio_info_init (&demux->audio_info);
 
   demux->need_stream_start = TRUE;
   demux->need_caps = TRUE;
