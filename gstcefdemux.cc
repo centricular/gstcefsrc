@@ -150,7 +150,7 @@ gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *p
   GST_BUFFER_PTS (*buffer) = push_data->demux->last_audio_time;
 
   gst_buffer_add_audio_meta (*buffer, &push_data->demux->audio_info, 
-                             gst_buffer_get_size (*buffer) / GST_AUDIO_INFO_BPS (&push_data->demux->audio_info), 
+                             gst_buffer_get_size (*buffer) / GST_AUDIO_INFO_BPF (&push_data->demux->audio_info), 
                              NULL);
 
   GST_BUFFER_FLAG_UNSET (*buffer, GST_BUFFER_FLAG_DISCONT);
