@@ -73,3 +73,34 @@ GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
 ``` shell
 gst-launch-1.0 playbin uri=web+https://www.soundcloud.com/platform/sama
 ```
+
+##Docker GPU Acceleration
+
+This is simply a hint/note for those who want to use this plugin in a docker container with GPU acceleration. Your particular setup may vary. The following was tested on Ubuntu 22.04 with a Nvidia GPU. This assumes you have installed the Nvidia drivers, docker, and the Nvidia Container Toolkit. You may also need to configure your xorg.conf within the container to use the Nvidia GPU. 
+
+- xserver-xorg-video-dummy is required in the container
+
+Running docker with the following flags will allow the container to access the host's GPU:
+
+``` shell
+docker run --gpus all -v /usr/local/cuda:/usr/local/cuda --device=/dev/dri/card0 --rm \
+-e DISPLAY=:1 -v /tmp/X11-unix:/tmp/.X11 -it <image> /bin/bash
+```
+
+Inside the container run:
+    
+``` shell
+Xorg -noreset +extension GLX +extension RANDR \+extension RENDER -logfile ./xserver.log vt1 :1 &
+```
+
+Test that the GPU is accessible by running:
+
+``` shell
+gst-launch-1.0 -e cefsrc url="chrome://gpu" gpu=true \
+chrome-extra-flags="use-gl=egl, enable-gpu-rasterization,ignore-gpu-blocklist" \
+! video/x-raw, width=1920, height=8080, framerate=1/1 \
+! cefdemux name=demux ! queue ! videoconvert \
+! pngenc ! multifilesink location="frame%d.png"
+```
+
+It is also helpful to run nvidia-smi or nvtop to verify the GPU is being used. Note it is possible to use the GPU within a kube pod as well. This has been tested and runs in a production environment on GKE using Container Optimized OS.
