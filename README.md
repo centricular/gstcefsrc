@@ -74,7 +74,7 @@ GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
 gst-launch-1.0 playbin uri=web+https://www.soundcloud.com/platform/sama
 ```
 
-##Docker GPU Acceleration
+## Docker GPU Acceleration
 
 This is simply a hint/note for those who want to use this plugin in a docker container with GPU acceleration. Your particular setup may vary. The following was tested on Ubuntu 22.04 with a Nvidia GPU. This assumes you have installed the Nvidia drivers, docker, and the Nvidia Container Toolkit. You may also need to configure your xorg.conf within the container to use the Nvidia GPU. 
 
