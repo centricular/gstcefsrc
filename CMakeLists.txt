@@ -12,24 +12,23 @@ if(POLICY CMP0074)
 endif()
 
 if (NOT DEFINED CEF_VERSION)
-  set(CEF_VERSION "103.0.9+gd0bbcbb+chromium-103.0.5060.114")
+  set(CEF_VERSION "122.1.13+gde5b724+chromium-122.0.6261.130")
 endif()
 
 STRING(REGEX REPLACE "\\+" "%2B" CEF_ESCAPED_VERSION ${CEF_VERSION})
 
+set(USE_SANDBOX OFF)
 # Determine the platform.
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
-  set(CEF_PLATFORM "macosx64")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+    set(CEF_PLATFORM "macosarm64")
+    set(USE_SANDBOX ON)
+  else()
+    set(CEF_PLATFORM "macosx64")
+  endif()
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   if(CMAKE_SIZEOF_VOID_P MATCHES 8)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch")
-      set(CEF_PLATFORM "linuxarm64")
-      # cef_variables doesn't handle linux/arm64 case yet. See
-      # https://bitbucket.org/chromiumembedded/cef/issues/3417/project-arch-detection-support-is-missing
-      set(PROJECT_ARCH "arm64")
-    else()
-      set(CEF_PLATFORM "linux64")
-    endif()
+    set(CEF_PLATFORM "linux64")
   else()
     set(CEF_PLATFORM "linux32")
   endif()
@@ -67,7 +66,16 @@ pkg_check_modules(GST REQUIRED gstreamer-1.0
                   gstreamer-video-1.0
                   gstreamer-audio-1.0)
 
-ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+message(USE_SANDBOX=${USE_SANDBOX})
+if(USE_SANDBOX)
+  message("Using the CEF sandbox.")
+  set(CMAKE_MACOSX_RPATH 1)
+  set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR OFF)
+  set(CMAKE_INSTALL_NAME_DIR "@rpath")
+  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_SANDBOX_LIB_DEBUG}" "${CEF_SANDBOX_LIB_RELEASE}")
+else()
+  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+endif()
 
 SET_CEF_TARGET_OUT_DIR()
 
@@ -80,7 +88,6 @@ target_include_directories("gstcefsubprocess" PUBLIC ${GST_INCLUDE_DIRS})
 set_target_properties("gstcefsubprocess" PROPERTIES INSTALL_RPATH "$ORIGIN")
 set_target_properties("gstcefsubprocess" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 set_target_properties("gstcefsubprocess" PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CEF_TARGET_OUT_DIR})
-
 link_directories(${GST_LIBRARY_DIRS})
 
 add_library("gstcef" SHARED ${GSTCEF_SRCS})
@@ -88,7 +95,6 @@ SET_LIBRARY_TARGET_PROPERTIES("gstcef")
 add_dependencies("gstcef" libcef_dll_wrapper)
 target_link_libraries("gstcef" libcef_lib libcef_dll_wrapper ${CEF_STANDARD_LIBS} ${GST_LIBRARIES})
 target_include_directories("gstcef" PUBLIC ${GST_INCLUDE_DIRS})
-
 set_target_properties("gstcef" PROPERTIES INSTALL_RPATH "$ORIGIN")
 set_target_properties("gstcef" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 set_target_properties("gstcef" PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CEF_TARGET_OUT_DIR})

@@ -20,6 +20,9 @@
 #include "gstcefsrc.h"
 #include "gstcefdemux.h"
 #include "gstcefbin.h"
+#ifdef GST_CEF_USE_SANDBOX
+#include "include/wrapper/cef_library_loader.h"
+#endif
 
 static gboolean
 plugin_init(GstPlugin *plugin)
@@ -28,6 +31,12 @@ plugin_init(GstPlugin *plugin)
       !gst_element_register (plugin, "cefdemux", GST_RANK_NONE, GST_TYPE_CEF_DEMUX) ||
       !gst_element_register (plugin, "cefbin", GST_RANK_NONE, GST_TYPE_CEF_BIN))
     return FALSE;
+
+#ifdef GST_CEF_USE_SANDBOX
+  CefScopedLibraryLoader loader;
+  if (!loader.LoadInMain())
+    return FALSE;
+#endif
 
   return TRUE;
 }
