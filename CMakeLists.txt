@@ -17,18 +17,25 @@ endif()
 
 STRING(REGEX REPLACE "\\+" "%2B" CEF_ESCAPED_VERSION ${CEF_VERSION})
 
-set(USE_SANDBOX OFF)
+set(SANDBOX OFF)
 # Determine the platform.
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     set(CEF_PLATFORM "macosarm64")
-    set(USE_SANDBOX ON)
+    set(SANDBOX ON)
   else()
     set(CEF_PLATFORM "macosx64")
   endif()
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   if(CMAKE_SIZEOF_VOID_P MATCHES 8)
-    set(CEF_PLATFORM "linux64")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch")
+      set(CEF_PLATFORM "linuxarm64")
+      # cef_variables doesn't handle linux/arm64 case yet. See
+      # https://bitbucket.org/chromiumembedded/cef/issues/3417/project-arch-detection-support-is-missing
+      set(PROJECT_ARCH "arm64")
+    else()
+      set(CEF_PLATFORM "linux64")
+    endif()
   else()
     set(CEF_PLATFORM "linux32")
   endif()
@@ -66,8 +73,7 @@ pkg_check_modules(GST REQUIRED gstreamer-1.0
                   gstreamer-video-1.0
                   gstreamer-audio-1.0)
 
-message(USE_SANDBOX=${USE_SANDBOX})
-if(USE_SANDBOX)
+if(SANDBOX)
   message("Using the CEF sandbox.")
   set(CMAKE_MACOSX_RPATH 1)
   set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR OFF)
