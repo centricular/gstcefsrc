@@ -641,6 +641,8 @@ gst_cef_src_stop (GstBaseSrc *base_src)
     g_mutex_unlock (&src->state_lock);
   }
 
+  gst_buffer_replace (&src->current_buffer, NULL);
+
   return TRUE;
 }
 
