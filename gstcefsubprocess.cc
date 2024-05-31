@@ -20,8 +20,11 @@
 #include <include/cef_app.h>
 #include <glib.h>
 
+#include "gstcefloader.h"
+
 int main(int argc, char * argv[])
 {
+
   CefSettings settings;
 
 #ifdef G_OS_WIN32
@@ -29,6 +32,12 @@ int main(int argc, char * argv[])
   CefMainArgs args(hInstance);
 #else
   CefMainArgs args(argc, argv);
+#endif
+
+#ifdef GST_CEF_USE_SANDBOX
+  if (!gst_initialize_cef(TRUE)) {
+    return -1;
+  }
 #endif
 
   return CefExecuteProcess(args, nullptr, nullptr);

@@ -11,6 +11,8 @@ project(gstcef)
 
 set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 
+find_package(PkgConfig REQUIRED)
+
 if(POLICY CMP0074)
     #policy for <PackageName>_ROOT variables
     cmake_policy(SET CMP0074 NEW)
@@ -24,10 +26,10 @@ STRING(REGEX REPLACE "\\+" "%2B" CEF_ESCAPED_VERSION ${CEF_VERSION})
 
 set(SANDBOX OFF)
 # Determine the platform.
-if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
+if (APPLE)
+  set(SANDBOX ON)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
     set(CEF_PLATFORM "macosarm64")
-    set(SANDBOX ON)
   else()
     set(CEF_PLATFORM "macosx64")
   endif()
@@ -66,13 +68,13 @@ set(GSTCEF_SRCS
   gstcefdemux.cc
   gstcefbin.cc
   gstcefaudiometa.cc
+  gstcefloader.cc
 )
 
 set(GSTCEFSUBPROCESS_SRCS
+  gstcefloader.cc
   gstcefsubprocess.cc
 )
-
-find_package(PkgConfig)
 
 pkg_check_modules(GST REQUIRED gstreamer-1.0
                   gstreamer-video-1.0
@@ -96,9 +98,11 @@ SET_EXECUTABLE_TARGET_PROPERTIES("gstcefsubprocess")
 target_link_libraries("gstcefsubprocess" libcef_dll_wrapper ${CEF_STANDARD_LIBS})
 if (NOT APPLE)
 target_link_libraries("gstcefsubprocess" libcef_lib)
+set_target_properties("gstcefsubprocess" PROPERTIES INSTALL_RPATH "$ORIGIN")
+else()
+target_link_options("gstcefsubprocess" PRIVATE "${GST_LDFLAGS}")
 endif()
 target_include_directories("gstcefsubprocess" PUBLIC ${GST_INCLUDE_DIRS})
-set_target_properties("gstcefsubprocess" PROPERTIES INSTALL_RPATH "$ORIGIN")
 set_target_properties("gstcefsubprocess" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 set_target_properties("gstcefsubprocess" PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CEF_TARGET_OUT_DIR})
 link_directories(${GST_LIBRARY_DIRS})
@@ -117,6 +121,13 @@ set_target_properties("gstcef" PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CEF_TARGET_
 
 COPY_FILES("gstcef" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
 COPY_FILES("gstcef" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+if (APPLE)
+  pkg_check_modules(PC_GLib glib-2.0 REQUIRED IMPORTED_TARGET)
+  # Copy framework for testing
+  COPY_FILES("gstcef" "Chromium\ Embedded\ Framework.framework" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
+  target_link_libraries("gstcef" PkgConfig::PC_GLib)
+  target_link_libraries("gstcefsubprocess" PkgConfig::PC_GLib)
+endif()
 
 install(
   DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/
