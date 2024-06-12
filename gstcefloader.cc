@@ -68,8 +68,9 @@ std::string GetFrameworkAsSibling(bool helper)
   ss << parent_dir.get() << "/" << kFrameworkPath;
   return ss.str();
 }
+} // namespace
 
-std::string GetFrameworkPath(bool helper)
+std::string gst_cef_get_framework_path(bool helper)
 {
   std::string framework = GetFrameworkFromExecutablePath(helper);
   if (g_access(framework.c_str(), F_OK) == 0) {
@@ -84,11 +85,10 @@ std::string GetFrameworkPath(bool helper)
 
   return {};
 }
-} // namespace
 
 gboolean gst_initialize_cef(bool helper)
 {
-  const std::string framework_path = GetFrameworkPath(helper);
+  const std::string framework_path = gst_cef_get_framework_path(helper);
   if (framework_path.empty()) {
     fprintf(stderr, "Cannot initialize CEF: App does not have the expected "
                     "bundle structure.\n");
