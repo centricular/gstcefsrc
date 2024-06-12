@@ -1,6 +1,11 @@
 #include <stdio.h>
-#include <iostream>
-#include <sstream>
+#ifdef __APPLE__
+#include <memory>
+#include <string>
+#include <vector>
+#include <mach-o/dyld.h>
+#include <dispatch/dispatch.h>
+#endif
 
 #include <include/base/cef_bind.h>
 #include <include/base/cef_callback_helpers.h>
@@ -502,6 +507,30 @@ run_cef (GstCefSrc *src)
 
   CefString(&settings.browser_subprocess_path).FromASCII(browser_subprocess_path);
   g_free(browser_subprocess_path);
+
+#ifdef __APPLE__
+  const std::string framework_folder = []() {
+    std::string framework = gst_cef_get_framework_path(false);
+    const auto split = framework.find_last_of('/');
+    return framework.substr(0, split);
+  }();
+  fprintf(stderr, "CEF framework_dir_path: %s\n", framework_folder.c_str());
+  CefString(&settings.framework_dir_path).FromString(framework_folder);
+  const std::string main_bundle_folder = [](){
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> host(size);
+    _NSGetExecutablePath(host.data(), &size);
+    auto host2 = std::unique_ptr<char>(realpath(host.data(), nullptr));
+    fprintf(stderr, "Main executable path: %s\n", host2.get());
+    assert(size != 0);
+    std::string host3(host2.get());
+    const auto split = host3.find("Contents/MacOS");
+    assert(split != std::string::npos);
+    return host3.substr(0, split);
+  }();
+  CefString(&settings.main_bundle_path).FromString(main_bundle_folder);
+#endif
 
   gchar *locales_dir_path = g_build_filename(base_path, "locales", NULL);
   CefString(&settings.locales_dir_path).FromASCII(locales_dir_path);
