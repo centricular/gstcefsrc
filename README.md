@@ -7,6 +7,15 @@ mkdir build && cd build
 cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
+#### Windows Build: ####
+
+```
+mkdir build && cd build
+cmake ..
+cmake --build .
+```
+
+* *Note:* Add Debug folder to Path and GST_PLUGIN_PATH environment variables.
 
 ### Optional CMake variables
 
