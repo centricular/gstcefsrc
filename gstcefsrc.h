@@ -1,6 +1,7 @@
 #ifndef __GST_CEF_SRC_H__
 #define __GST_CEF_SRC_H__
 
+#include "include/cef_browser_process_handler.h"
 #include <gst/gst.h>
 #include <gst/base/gstpushsrc.h>
 #include <gst/video/video.h>
@@ -56,7 +57,27 @@ struct _GstCefSrcClass {
   GstPushSrcClass parent_class;
 };
 
+class App : public CefApp, public CefBrowserProcessHandler {
+public:
+  App(GstCefSrc *src);
+
+  void OnBeforeCommandLineProcessing(const CefString &process_type,
+                                     CefRefPtr<CefCommandLine> command_line) override;
+
+  CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override;
+#ifdef __APPLE__
+  void OnScheduleMessagePumpWork(int64_t delay_ms) override;
+#endif
+private:
+  IMPLEMENT_REFCOUNTING(App);
+  GstCefSrc *src;
+};
+
 GType gst_cef_src_get_type (void);
+
+#ifdef __APPLE__
+void gst_cef_unload();
+#endif
 
 G_END_DECLS
 
