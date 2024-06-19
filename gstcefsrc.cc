@@ -26,7 +26,7 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
-#define DEFAULT_LOG_SEVERITY LOGSEVERITY_DISABLE
+#define DEFAULT_LOG_SEVERITY LOGSEVERITY_DEFAULT
 #define DEFAULT_SANDBOX FALSE
 
 static gboolean cef_inited = FALSE;
