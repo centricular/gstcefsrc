@@ -31,7 +31,11 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_GPU FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
 #define DEFAULT_LOG_SEVERITY LOGSEVERITY_DEFAULT
+#if !defined(__APPLE__) && defined(GST_CEF_USE_SANDBOX)
+#define DEFAULT_SANDBOX TRUE
+#else
 #define DEFAULT_SANDBOX FALSE
+#endif
 
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
@@ -423,14 +427,18 @@ void App::OnBeforeCommandLineProcessing(const CefString &process_type,
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
     command_line->AppendSwitch("enable-begin-frame-scheduling"); /* https://bitbucket.org/chromiumembedded/cef/issues/1368 */
 
+#ifdef __APPLE__
+    command_line->AppendSwitch("off-screen-rendering-enabled");
+    if (src->gpu) {
+      GST_WARNING_OBJECT(src, "GPU rendering is known not to work on macOS. Disabling it now. See https://github.com/chromiumembedded/cef/issues/3322 and https://magpcss.org/ceforum/viewtopic.php?f=6&t=19397");
+      src->gpu = FALSE;
+    }
+#endif
+
     if (!src->gpu) {
       // Optimize for no gpu usage
       command_line->AppendSwitch("disable-gpu");
       command_line->AppendSwitch("disable-gpu-compositing");
-    } else {
-#ifdef __APPLE__
-      command_line->AppendSwitch("in-process-gpu");
-#endif
     }
 
     if (src->chromium_debug_port >= 0) {
@@ -570,13 +578,18 @@ run_cef (GstCefSrc *src)
     g_free(old_base_path);
   }
 
+#ifdef __APPLE__
+  gchar* browser_subprocess_path = g_build_filename(base_path, "gstcefsubprocess.app/Contents/MacOS/gstcefsubprocess", nullptr);
+#else
   gchar* browser_subprocess_path = g_build_filename(base_path, "gstcefsubprocess", nullptr);
+#endif
   if (const gchar *custom_subprocess_path = g_getenv ("GST_CEF_SUBPROCESS_PATH")) {
     g_setenv ("CEF_SUBPROCESS_PATH", browser_subprocess_path, TRUE);
     g_free (browser_subprocess_path);
     browser_subprocess_path = g_strdup (custom_subprocess_path);
   }
 
+  GST_DEBUG_OBJECT(src, "CEF subprocess: %s", browser_subprocess_path);
   CefString(&settings.browser_subprocess_path).FromASCII(browser_subprocess_path);
   g_free(browser_subprocess_path);
 
