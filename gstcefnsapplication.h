@@ -4,6 +4,7 @@
 #pragma once
 
 #import <CoreFoundation/CoreFoundation.h>
+#include <objc/objc.h>
 
 /// Schedules a job to handle CEF's work for immediate execution
 /// on the main thread. The function does not block.

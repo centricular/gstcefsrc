@@ -1,4 +1,4 @@
-#include <stdio.h>
+#include <cstdio>
 #ifdef __APPLE__
 #include <memory>
 #include <string>
@@ -15,6 +15,7 @@
 #include "gstcefsrc.h"
 #include "gstcefaudiometa.h"
 #ifdef __APPLE__
+#include "gstcefloader.h"
 #include "gstcefnsapplication.h"
 #endif
 
@@ -37,14 +38,29 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_SANDBOX FALSE
 #endif
 
+// Blocks other elements from initializing CEF is it's already in progress.
+static gboolean cef_initializing = FALSE;
+// CEF's initialization process has completed, irrespective of its success.
 static gboolean cef_inited = FALSE;
+// CEF has been marked for shutdown, stopping any leftover events from being
+// processed. Any elements that need it must wait till this flag and
+// cef_initializing are cleared.
+static gboolean cef_shutdown = FALSE;
+// CEF initialization status. If cef_inited == TRUE and this variable is FALSE,
+// no CEF elements will be allowed to complete initialization.
 static gboolean init_result = FALSE;
+// Number of running CEF instances. Setting this to 0 must be accompanied
+// with cef_shutdown to prevent leaks on application exit.
+static guint64 browsers = 0U;
 static GMutex init_lock;
 static GCond init_cond;
 
 #ifdef __APPLE__
-static gboolean cef_shutdown = FALSE;
+// On every timeout, the CEF event handler will be run in the context
+// of the main thread's Cocoa event loop.
 static CFRunLoopTimerRef workTimer_ = nullptr;
+#else
+static GThread *thread = nullptr;
 #endif
 
 #define GST_TYPE_CEF_LOG_SEVERITY_MODE \
@@ -359,6 +375,15 @@ void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   mElement->started = FALSE;
   g_cond_signal (&mElement->state_cond);
   g_mutex_unlock(&mElement->state_lock);
+  g_mutex_lock(&init_lock);
+  g_assert (browsers > 0);
+  browsers -= 1;
+  if (browsers == 0) {
+    cef_shutdown = TRUE;
+    CefQuitMessageLoop();
+  }
+  g_cond_broadcast (&init_cond);
+  g_mutex_unlock (&init_lock);
 }
 
 void BrowserClient::MakeBrowser(int arg)
@@ -369,6 +394,10 @@ void BrowserClient::MakeBrowser(int arg)
 
   window_info.SetAsWindowless(0);
   browser = CefBrowserHost::CreateBrowserSync(window_info, this, std::string(mElement->url), browser_settings, nullptr, nullptr);
+  g_mutex_lock (&init_lock);
+  g_assert (browsers < G_MAXUINT64);
+  browsers += 1;
+  g_mutex_unlock(&init_lock);
 
   browser->GetHost()->SetAudioMuted(true);
 
@@ -504,34 +533,17 @@ gst_cef_shutdown(void *)
 {
 #ifdef __APPLE__
   CefQuitMessageLoop();
-
-  g_mutex_lock (&init_lock);
-  cef_shutdown = TRUE;
-  CefShutdown();
-  g_cond_signal(&init_cond);
-  g_mutex_unlock (&init_lock);
-#else
-  CefShutdown();
-
-  g_mutex_lock (&init_lock);
-  cef_inited = FALSE;
-  g_cond_signal(&init_cond);
-  g_mutex_unlock (&init_lock);
 #endif
+
+  g_mutex_lock (&init_lock);
+  CefShutdown();
+  cef_shutdown = FALSE;
+  cef_inited = FALSE;
+  init_result = FALSE;
+  g_cond_broadcast (&init_cond);
+  g_mutex_unlock (&init_lock);
   return nullptr;
 }
-
-void
-gst_cef_unload()
-{
-  static GOnce init_once = G_ONCE_INIT;
-
-  g_once (&init_once, &gst_cef_shutdown, nullptr);
-}
-
-#ifdef __APPLE__
-extern void gst_cef_set_shutdown_observer();
-#endif
 
 /* Once we have started a first cefsrc for this process, we start
  * a UI thread and never shut it down. We could probably refine this
@@ -558,12 +570,12 @@ run_cef (GstCefSrc *src)
   settings.no_sandbox = !src->sandbox;
   settings.windowless_rendering_enabled = true;
   settings.log_severity = src->log_severity;
-#ifdef __APPLE__
   settings.multi_threaded_message_loop = false;
+#ifdef __APPLE__
   settings.external_message_pump = true;
 #endif
 
-  GST_INFO  ("Initializing CEF");
+  GST_INFO_OBJECT(src, "Initializing CEF");
 
   gchar* base_path = get_plugin_base_path();
 
@@ -639,7 +651,7 @@ run_cef (GstCefSrc *src)
     /* unblock start () */
     g_mutex_lock (&init_lock);
     cef_inited = TRUE;
-    g_cond_signal(&init_cond);
+    g_cond_broadcast (&init_cond);
     g_mutex_unlock (&init_lock);
 
     goto done;
@@ -648,62 +660,103 @@ run_cef (GstCefSrc *src)
   g_mutex_lock (&init_lock);
   cef_inited = TRUE;
   init_result = TRUE;
-  g_cond_signal(&init_cond);
+  cef_shutdown = FALSE;
+  g_cond_broadcast (&init_cond);
   g_mutex_unlock (&init_lock);
 
-#ifdef __APPLE__
-  gst_cef_set_shutdown_observer();
-#else
+#ifndef __APPLE__
   CefRunMessageLoop();
-  gst_cef_unload();
+  gst_cef_shutdown(nullptr);
 #endif
+
 done:
   return NULL;
 }
 
-// It is too late to deinitialize CEF when __cxa_finalize_ranges is called.
-// You'll get an assertion from context.cc(41).
-#ifndef __APPLE__
-void quit_message_loop (int arg)
+static GstStateChangeReturn
+gst_cef_src_change_state(GstElement *element, GstStateChange transition)
 {
-  CefQuitMessageLoop();
-}
+  auto result = GST_CALL_PARENT_WITH_DEFAULT (GST_ELEMENT_CLASS , change_state, (element, transition), GST_STATE_CHANGE_FAILURE);
 
-class ShutdownEnforcer {
- public:
-  ~ShutdownEnforcer() {
-    if (!cef_inited)
-      return;
-
-    CefPostTask(TID_UI, base::BindOnce(&quit_message_loop, 0));
-
-    g_mutex_lock(&init_lock);
-    while (cef_inited)
+  switch(transition)
+  {
+  case GST_STATE_CHANGE_NULL_TO_READY:
+  {
+    g_mutex_lock (&init_lock);
+    // Wait till a previous CEF is dismantled or completes initialization
+    while (cef_shutdown || cef_initializing)
       g_cond_wait (&init_cond, &init_lock);
-    g_mutex_unlock (&init_lock);
-  }
-} shutdown_enforcer;
-#endif
-
-static gpointer
-init_cef (gpointer src)
-{
-  g_mutex_init (&init_lock);
-  g_cond_init (&init_cond);
-
+    if (cef_inited && !init_result) {
+      // BAIL OUT, CEF is not loaded.
+      result = GST_STATE_CHANGE_FAILURE;
+    } else if (!cef_inited) {
+      cef_initializing = TRUE;
+      /* Initialize Chromium Embedded Framework */
 #ifdef __APPLE__
-  dispatch_async_f(dispatch_get_main_queue(), src, (dispatch_function_t)&run_cef);
+      /* in the main thread as per Cocoa */
+      if (pthread_main_np()) {
+        g_mutex_unlock (&init_lock);
+        run_cef ((GstCefSrc*) element);
+        g_mutex_lock (&init_lock);
+      } else {
+        dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)element, (dispatch_function_t)&run_cef);
+        while (!cef_inited)
+          g_cond_wait (&init_cond, &init_lock);
+      }
 #else
-  g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, src);
+        /* in a separate UI thread */
+      thread = g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, (GstCefSrc*)element);
+      while (!cef_inited)
+        g_cond_wait (&init_cond, &init_lock);
 #endif
-
-  return NULL;
+      if (!init_result) {
+        // BAIL OUT, CEF is not loaded.
+        result = GST_STATE_CHANGE_FAILURE;
+#ifndef __APPLE__
+        g_thread_join(thread);
+        thread = nullptr;
+#endif
+      }
+      cef_initializing = FALSE;
+      g_cond_broadcast (&init_cond);
+    }
+    g_mutex_unlock(&init_lock);
+    break;
+  }
+  case GST_STATE_CHANGE_READY_TO_NULL:
+  {
+    g_mutex_lock (&init_lock);
+    if (cef_shutdown) {
+      /* Shut it down */
+#ifdef __APPLE__
+      /* in the main thread as per Cocoa */
+      dispatch_async_f(dispatch_get_main_queue(), nullptr, (dispatch_function_t)&gst_cef_shutdown);
+#else
+      // the UI thread handles it through the message loop return,
+      // this MUST NOT let GStreamer conduct unwind ops until CEF is truly dead
+#endif
+      while (cef_shutdown)
+        g_cond_wait (&init_cond, &init_lock);
+#ifndef __APPLE__
+      // First element to reach this must clean the thread up
+      if (thread) {
+        g_thread_join(thread);
+        thread = nullptr;
+      }
+#endif
+    }
+    g_mutex_unlock (&init_lock);
+    break;
+  }
+  default:
+    break;
+  }
+  return result;
 }
 
 static gboolean
 gst_cef_src_start(GstBaseSrc *base_src)
 {
-  static GOnce init_once = G_ONCE_INIT;
   gboolean ret = FALSE;
   GstCefSrc *src = GST_CEF_SRC (base_src);
   CefRefPtr<BrowserClient> browserClient;
@@ -711,9 +764,6 @@ gst_cef_src_start(GstBaseSrc *base_src)
   CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
   CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
   CefRefPtr<DisplayHandler> displayHandler = new DisplayHandler(src);
-
-  /* Initialize global variables */
-  g_once (&init_once, init_cef, src);
 
   /* Make sure CEF is initialized before posting a task */
   g_mutex_lock (&init_lock);
@@ -1068,6 +1118,8 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
   base_src_class->stop = GST_DEBUG_FUNCPTR(gst_cef_src_stop);
   base_src_class->get_times = GST_DEBUG_FUNCPTR(gst_cef_src_get_times);
   base_src_class->query = GST_DEBUG_FUNCPTR(gst_cef_src_query);
+
+  gstelement_class->change_state = GST_DEBUG_FUNCPTR(gst_cef_src_change_state);
 
   push_src_class->create = GST_DEBUG_FUNCPTR(gst_cef_src_create);
 
