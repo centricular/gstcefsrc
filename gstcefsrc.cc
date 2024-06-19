@@ -195,7 +195,7 @@ class AudioHandler : public CefAudioHandler
     GstStructure *s = gst_structure_new ("cef-audio-stream-start",
         "channels", G_TYPE_INT, channels,
         "rate", G_TYPE_INT, params.sample_rate,
-        NULL);
+        nullptr);
     GstEvent *event = gst_event_new_custom (GST_EVENT_CUSTOM_DOWNSTREAM, s);
 
     mRate = params.sample_rate;
@@ -572,7 +572,7 @@ run_cef (GstCefSrc *src)
     gchar* current_dir = g_get_current_dir();
 
     gchar* old_base_path = base_path;
-    base_path = g_build_filename(current_dir, base_path, NULL);
+    base_path = g_build_filename(current_dir, base_path, nullptr);
 
     g_free(current_dir);
     g_free(old_base_path);
@@ -617,7 +617,7 @@ run_cef (GstCefSrc *src)
   CefString(&settings.main_bundle_path).FromString(main_bundle_folder);
 #endif
 
-  gchar *locales_dir_path = g_build_filename(base_path, "locales", NULL);
+  gchar *locales_dir_path = g_build_filename(base_path, "locales", nullptr);
   CefString(&settings.locales_dir_path).FromASCII(locales_dir_path);
 
   if (src->js_flags != NULL) {
@@ -824,7 +824,7 @@ gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
   if (gst_structure_has_field (structure, "framerate"))
     gst_structure_fixate_field_nearest_fraction (structure, "framerate", DEFAULT_FPS_N, DEFAULT_FPS_D);
   else
-    gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, DEFAULT_FPS_N, DEFAULT_FPS_D, NULL);
+    gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, DEFAULT_FPS_N, DEFAULT_FPS_D, nullptr);
 
 
   caps = GST_BASE_SRC_CLASS (parent_class)->fixate (base_src, caps);
