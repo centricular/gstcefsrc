@@ -75,10 +75,6 @@ private:
 
 GType gst_cef_src_get_type (void);
 
-#ifdef __APPLE__
-void gst_cef_unload();
-#endif
-
 G_END_DECLS
 
 #endif /* __GST_CEF_SRC_H__ */
