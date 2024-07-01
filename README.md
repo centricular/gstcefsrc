@@ -24,6 +24,48 @@ yourself. Thankfully at least two projects can help you with that daunting task:
 - https://github.com/reinismu/cefbuild : Docker to build cef with all codecs
 - https://github.com/philn/cef-build-box : Semi-automatic and reproducible CEF build
 
+## Preparation
+
+On macOS, CEF tests at multiple steps that it is being loaded from within an
+application bundle. This means that when you call e.g. `gst-launch-1.0`, it must
+first be turned into a macOS app. To do this, you can follow these steps:
+
+1. Move `<path to GStreamer.framework/Versions/1.0>/bin/gst-launch-1.0` to `<path to GStreamer.framework/Versions/1.0>/bin/gst-launch-1.0.app/Contents/MacOS/gst-launch-1.0`
+2. Symlink `<path to GStreamer.framework/Versions/1.0>/bin/gst-launch-1.0.app/Contents/MacOS/gst-launch-1.0` to `<path to GStreamer.framework/Versions/1.0>/bin/gst-launch-1.0`
+3. Paste the XML file below into `<path to GStreamer.framework/Versions/1.0>/bin/gst-launch-1.0.app/Contents/Info.plist`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleGetInfoString</key>
+  <string>GStreamer</string>
+  <key>CFBundleExecutable</key>
+  <string>gst-launch-1.0</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.gstreamer.GStreamer</string>
+  <key>CFBundleName</key>
+  <string>gst-launch-1.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSHighResolutionCapable</key>
+  <string>True</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>10.13.0</string>
+</dict>
+</plist>
+```
+
+After this, you can run the steps below, replacing `gst-launch-1.0` with 
+`<path to GStreamer.framework/Versions/1.0>/bin/gst-launch-1.0.app/Contents/MacOS/gst-launch-1.0`.
+
 ## Run
 
 The element can then be tested with:
