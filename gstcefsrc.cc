@@ -38,17 +38,24 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_SANDBOX FALSE
 #endif
 
-// Blocks other elements from initializing CEF is it's already in progress.
-static gboolean cef_initializing = FALSE;
-// CEF's initialization process has completed, irrespective of its success.
-static gboolean cef_inited = FALSE;
-// CEF has been marked for shutdown, stopping any leftover events from being
-// processed. Any elements that need it must wait till this flag and
-// cef_initializing are cleared.
-static gboolean cef_shutdown = FALSE;
-// CEF initialization status. If cef_inited == TRUE and this variable is FALSE,
-// no CEF elements will be allowed to complete initialization.
-static gboolean init_result = FALSE;
+using CefStatus = enum : guint8 {
+  // CEF was either unloaded successfully or not yet loaded.
+  CEF_STATUS_NOT_LOADED = 0U,
+  // Blocks other elements from initializing CEF is it's already in progress.
+  CEF_STATUS_INITIALIZING = 1U,
+  // CEF's initialization process has completed successfully.
+  CEF_STATUS_INITIALIZED = 1U << 2U,
+  // No CEF elements will be allowed to complete initialization.
+  CEF_STATUS_FAILURE = 1U << 3U,
+  // CEF has been marked for shutdown, stopping any leftover events from being
+  // processed. Any elements that need it must wait till this flag and
+  // cef_initializing are cleared.
+  CEF_STATUS_SHUTTING_DOWN = 1U << 4U,
+};
+static CefStatus cef_status = CEF_STATUS_NOT_LOADED;
+static const guint8 CEF_STATUS_MASK_INITIALIZED = CEF_STATUS_FAILURE | CEF_STATUS_INITIALIZED;
+static const guint8 CEF_STATUS_MASK_TRANSITIONING = CEF_STATUS_SHUTTING_DOWN | CEF_STATUS_INITIALIZING;
+
 // Number of running CEF instances. Setting this to 0 must be accompanied
 // with cef_shutdown to prevent leaks on application exit.
 static guint64 browsers = 0U;
@@ -379,7 +386,7 @@ void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   g_assert (browsers > 0);
   browsers -= 1;
   if (browsers == 0) {
-    cef_shutdown = TRUE;
+    cef_status = CEF_STATUS_SHUTTING_DOWN;
     CefQuitMessageLoop();
   }
   g_cond_broadcast (&init_cond);
@@ -428,7 +435,7 @@ void App::OnScheduleMessagePumpWork(int64_t delay_ms)
     workTimer_ = nullptr;
   }
 
-  if (cef_shutdown) return;
+  if (cef_status == CEF_STATUS_SHUTTING_DOWN) return;
 
   if (delay_ms <= 0) {
     // Execute the work immediately.
@@ -537,9 +544,7 @@ gst_cef_shutdown(void *)
 
   g_mutex_lock (&init_lock);
   CefShutdown();
-  cef_shutdown = FALSE;
-  cef_inited = FALSE;
-  init_result = FALSE;
+  cef_status = CEF_STATUS_NOT_LOADED;
   g_cond_broadcast (&init_cond);
   g_mutex_unlock (&init_lock);
   return nullptr;
@@ -650,7 +655,7 @@ run_cef (GstCefSrc *src)
 
     /* unblock start () */
     g_mutex_lock (&init_lock);
-    cef_inited = TRUE;
+    cef_status = CEF_STATUS_FAILURE;
     g_cond_broadcast (&init_cond);
     g_mutex_unlock (&init_lock);
 
@@ -658,9 +663,7 @@ run_cef (GstCefSrc *src)
   }
 
   g_mutex_lock (&init_lock);
-  cef_inited = TRUE;
-  init_result = TRUE;
-  cef_shutdown = FALSE;
+  cef_status = CEF_STATUS_INITIALIZED;
   g_cond_broadcast (&init_cond);
   g_mutex_unlock (&init_lock);
 
@@ -684,13 +687,13 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
   {
     g_mutex_lock (&init_lock);
     // Wait till a previous CEF is dismantled or completes initialization
-    while (cef_shutdown || cef_initializing)
+    while (cef_status & CEF_STATUS_MASK_TRANSITIONING)
       g_cond_wait (&init_cond, &init_lock);
-    if (cef_inited && !init_result) {
+    if (cef_status == CEF_STATUS_FAILURE) {
       // BAIL OUT, CEF is not loaded.
       result = GST_STATE_CHANGE_FAILURE;
-    } else if (!cef_inited) {
-      cef_initializing = TRUE;
+    } else if (cef_status == CEF_STATUS_NOT_LOADED) {
+      cef_status = CEF_STATUS_INITIALIZING;
       /* Initialize Chromium Embedded Framework */
 #ifdef __APPLE__
       /* in the main thread as per Cocoa */
@@ -700,16 +703,16 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
         g_mutex_lock (&init_lock);
       } else {
         dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)element, (dispatch_function_t)&run_cef);
-        while (!cef_inited)
+        while (cef_status == CEF_STATUS_INITIALIZING)
           g_cond_wait (&init_cond, &init_lock);
       }
 #else
         /* in a separate UI thread */
       thread = g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, (GstCefSrc*)element);
-      while (!cef_inited)
+      while (cef_status == CEF_STATUS_INITIALIZING)
         g_cond_wait (&init_cond, &init_lock);
 #endif
-      if (!init_result) {
+      if (cef_status != CEF_STATUS_INITIALIZED) {
         // BAIL OUT, CEF is not loaded.
         result = GST_STATE_CHANGE_FAILURE;
 #ifndef __APPLE__
@@ -717,8 +720,6 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
         thread = nullptr;
 #endif
       }
-      cef_initializing = FALSE;
-      g_cond_broadcast (&init_cond);
     }
     g_mutex_unlock(&init_lock);
     break;
@@ -726,7 +727,7 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
   case GST_STATE_CHANGE_READY_TO_NULL:
   {
     g_mutex_lock (&init_lock);
-    if (cef_shutdown) {
+    if (cef_status == CEF_STATUS_SHUTTING_DOWN) {
       /* Shut it down */
 #ifdef __APPLE__
       /* in the main thread as per Cocoa */
@@ -735,7 +736,7 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
       // the UI thread handles it through the message loop return,
       // this MUST NOT let GStreamer conduct unwind ops until CEF is truly dead
 #endif
-      while (cef_shutdown)
+      while (cef_status == CEF_STATUS_SHUTTING_DOWN)
         g_cond_wait (&init_cond, &init_lock);
 #ifndef __APPLE__
       // First element to reach this must clean the thread up
@@ -767,11 +768,11 @@ gst_cef_src_start(GstBaseSrc *base_src)
 
   /* Make sure CEF is initialized before posting a task */
   g_mutex_lock (&init_lock);
-  while (!cef_inited)
+  while (cef_status & ~CEF_STATUS_MASK_INITIALIZED)
     g_cond_wait (&init_cond, &init_lock);
   g_mutex_unlock (&init_lock);
 
-  if (!init_result)
+  if (cef_status == CEF_STATUS_FAILURE)
     goto done;
 
   GST_OBJECT_LOCK (src);
