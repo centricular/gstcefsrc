@@ -386,10 +386,8 @@ void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   g_assert (browsers > 0);
   browsers -= 1;
   if (browsers == 0) {
-    cef_status = CEF_STATUS_SHUTTING_DOWN;
     CefQuitMessageLoop();
   }
-  g_cond_broadcast (&init_cond);
   g_mutex_unlock (&init_lock);
 }
 
@@ -727,23 +725,23 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
   case GST_STATE_CHANGE_READY_TO_NULL:
   {
     g_mutex_lock (&init_lock);
-    if (cef_status == CEF_STATUS_SHUTTING_DOWN) {
-      /* Shut it down */
+    while (cef_status & CEF_STATUS_MASK_TRANSITIONING)
+      g_cond_wait (&init_cond, &init_lock);
+    /* At that point the element holds the lock and knows no status change is happening */
+    if (browsers == 0 && cef_status == CEF_STATUS_INITIALIZED) {
+      /* This element is the one in charge of shutting down */
+      cef_status = CEF_STATUS_SHUTTING_DOWN;
 #ifdef __APPLE__
       /* in the main thread as per Cocoa */
       dispatch_async_f(dispatch_get_main_queue(), nullptr, (dispatch_function_t)&gst_cef_shutdown);
-#else
+#endif
       // the UI thread handles it through the message loop return,
       // this MUST NOT let GStreamer conduct unwind ops until CEF is truly dead
-#endif
       while (cef_status == CEF_STATUS_SHUTTING_DOWN)
         g_cond_wait (&init_cond, &init_lock);
 #ifndef __APPLE__
-      // First element to reach this must clean the thread up
-      if (thread) {
-        g_thread_join(thread);
-        thread = nullptr;
-      }
+      g_thread_join(thread);
+      thread = nullptr;
 #endif
     }
     g_mutex_unlock (&init_lock);
