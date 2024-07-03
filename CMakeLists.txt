@@ -124,8 +124,10 @@ set_target_properties("gstcef" PROPERTIES INSTALL_RPATH "$ORIGIN")
 set_target_properties("gstcef" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
 set_target_properties("gstcef" PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CEF_TARGET_OUT_DIR})
 
-COPY_FILES("gstcef" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
-COPY_FILES("gstcef" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+install(
+  TARGETS "gstcef"
+  DESTINATION .
+)
 
 if (NOT APPLE)
   add_executable("gstcefsubprocess" ${GSTCEFSUBPROCESS_SRCS})
@@ -140,6 +142,13 @@ if (NOT APPLE)
   install(
     TARGETS "gstcefsubprocess"
     DESTINATION .
+  )
+  COPY_FILES("gstcef" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
+  COPY_FILES("gstcef" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+  install(
+    DIRECTORY "${CEF_RESOURCE_DIR}" "${CEF_BINARY_DIR}"
+    DESTINATION .
+    USE_SOURCE_PERMISSIONS
   )
 else()
   # Unlike in other OSes, CEF on macOS relies on several independent "helper"
@@ -192,13 +201,9 @@ else()
 
   # Copy framework for testing
   COPY_FILES("gstcef" "Chromium\ Embedded\ Framework.framework" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
+  install(
+    DIRECTORY "${CEF_BINARY_DIR}/Chromium Embedded Framework.framework" 
+    DESTINATION .
+    USE_SOURCE_PERMISSIONS
+  )
 endif()
-
-install(
-  DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/
-  DESTINATION .
-)
-install(
-  TARGETS "gstcef"
-  DESTINATION .
-)
