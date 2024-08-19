@@ -57,9 +57,9 @@ struct _GstCefSrcClass {
   GstPushSrcClass parent_class;
 };
 
-class App : public CefApp, public CefBrowserProcessHandler {
+class BrowserApp : public CefApp, public CefBrowserProcessHandler {
 public:
-  App(GstCefSrc *src);
+  BrowserApp(GstCefSrc *src);
 
   void OnBeforeCommandLineProcessing(const CefString &process_type,
                                      CefRefPtr<CefCommandLine> command_line) override;
@@ -69,7 +69,7 @@ public:
   void OnScheduleMessagePumpWork(int64_t delay_ms) override;
 #endif
 private:
-  IMPLEMENT_REFCOUNTING(App);
+  IMPLEMENT_REFCOUNTING(BrowserApp);
   GstCefSrc *src;
 };
 

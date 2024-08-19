@@ -414,17 +414,17 @@ void BrowserClient::MakeBrowser(int arg)
   g_mutex_unlock(&mElement->state_lock);
 }
 
-App::App(GstCefSrc *src) : src(src)
+BrowserApp::BrowserApp(GstCefSrc *src) : src(src)
 {
 }
 
-CefRefPtr<CefBrowserProcessHandler> App::GetBrowserProcessHandler()
+CefRefPtr<CefBrowserProcessHandler> BrowserApp::GetBrowserProcessHandler()
 {
   return this;
 }
 
 #ifdef __APPLE__
-void App::OnScheduleMessagePumpWork(int64_t delay_ms)
+void BrowserApp::OnScheduleMessagePumpWork(int64_t delay_ms)
 {
   static const int64_t kMaxTimerDelay = 1000.0 / 60.0;
 
@@ -453,7 +453,7 @@ void App::OnScheduleMessagePumpWork(int64_t delay_ms)
 }
 #endif
 
-void App::OnBeforeCommandLineProcessing(const CefString &process_type,
+void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
                                              CefRefPtr<CefCommandLine> command_line)
 {
     command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
@@ -566,7 +566,7 @@ run_cef (GstCefSrc *src)
 #endif
 
   CefSettings settings;
-  CefRefPtr<App> app;
+  CefRefPtr<BrowserApp> app;
   CefWindowInfo window_info;
   CefBrowserSettings browserSettings;
 
@@ -646,7 +646,7 @@ run_cef (GstCefSrc *src)
   g_free(base_path);
   g_free(locales_dir_path);
 
-  app = new App(src);
+  app = new BrowserApp(src);
 
   if (!CefInitialize(args, settings, app, nullptr)) {
     GST_ERROR ("Failed to initialize CEF");
