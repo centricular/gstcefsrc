@@ -326,17 +326,17 @@ class BrowserClient :
 {
   public:
 
-    BrowserClient(CefRefPtr<CefRenderHandler> rptr, CefRefPtr<CefAudioHandler> aptr, CefRefPtr<CefRequestHandler> rqptr, CefRefPtr<CefDisplayHandler> display_handler, GstCefSrc *element) :
-        render_handler(rptr),
-        audio_handler(aptr),
-        request_handler(rqptr),
-        display_handler(display_handler),
-        mElement(element)
+    BrowserClient(GstCefSrc *element) : mElement(element)
     {
+      this->render_handler = new RenderHandler(element);
+      this->audio_handler = new AudioHandler(element);
+      this->request_handler = new RequestHandler(element);
+      this->display_handler = new DisplayHandler(element);
     }
 
-    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
-        return this;
+    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override
+    {
+      return this;
     }
 
     virtual CefRefPtr<CefRenderHandler> GetRenderHandler() override
@@ -769,11 +769,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
 {
   gboolean ret = FALSE;
   GstCefSrc *src = GST_CEF_SRC (base_src);
-  CefRefPtr<BrowserClient> browserClient;
-  CefRefPtr<RenderHandler> renderHandler = new RenderHandler(src);
-  CefRefPtr<AudioHandler> audioHandler = new AudioHandler(src);
-  CefRefPtr<RequestHandler> requestHandler = new RequestHandler(src);
-  CefRefPtr<DisplayHandler> displayHandler = new DisplayHandler(src);
+  CefRefPtr<BrowserClient> browserClient = new BrowserClient(src);
 
   /* Make sure CEF is initialized before posting a task */
   g_mutex_lock (&init_lock);
@@ -787,8 +783,6 @@ gst_cef_src_start(GstBaseSrc *base_src)
   GST_OBJECT_LOCK (src);
   src->n_frames = 0;
   GST_OBJECT_UNLOCK (src);
-
-  browserClient = new BrowserClient(renderHandler, audioHandler, requestHandler, displayHandler, src);
 #ifdef __APPLE__
   if (pthread_main_np()) {
     /* in the main thread as per Cocoa */
