@@ -172,32 +172,6 @@ class RenderHandler : public CefRenderHandler
     IMPLEMENT_REFCOUNTING(RenderHandler);
 };
 
-class RequestHandler : public CefRequestHandler
-{
-  public:
-
-    RequestHandler(GstCefSrc *element) :
-        element (element)
-    {
-    }
-
-    ~RequestHandler()
-    {
-    }
-
-    virtual void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status) override
-		{
-			GST_WARNING_OBJECT (element, "Render subprocess terminated, reloading URL!");
-      browser->Reload();
-    }
-
-  private:
-
-    GstCefSrc *element;
-    IMPLEMENT_REFCOUNTING(RequestHandler);
-};
-
-
 class AudioHandler : public CefAudioHandler
 {
   public:
@@ -322,15 +296,16 @@ private:
 
 class BrowserClient :
   public CefClient,
-  public CefLifeSpanHandler
+  public CefLifeSpanHandler,
+  public CefRequestHandler
 {
   public:
 
     BrowserClient(GstCefSrc *element) : mElement(element)
     {
+
       this->render_handler = new RenderHandler(element);
       this->audio_handler = new AudioHandler(element);
-      this->request_handler = new RequestHandler(element);
       this->display_handler = new DisplayHandler(element);
     }
 
@@ -351,7 +326,7 @@ class BrowserClient :
 
     virtual CefRefPtr<CefRequestHandler> GetRequestHandler() override
     {
-      return request_handler;
+      return this;
     }
 
     virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override
@@ -359,15 +334,56 @@ class BrowserClient :
       return display_handler;
     }
 
-    virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
+    virtual void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status) override
+    {
+      CEF_REQUIRE_UI_THREAD();
+      GST_WARNING_OBJECT (mElement, "Render subprocess terminated, reloading URL!");
+      browser->Reload();
+    }
 
-    void MakeBrowser(int);
+    virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override
+    {
+      mElement->browser = nullptr;
+      g_mutex_lock (&mElement->state_lock);
+      mElement->started = FALSE;
+      g_cond_signal (&mElement->state_cond);
+      g_mutex_unlock(&mElement->state_lock);
+      g_mutex_lock(&init_lock);
+      g_assert (browsers > 0);
+      browsers -= 1;
+      if (browsers == 0) {
+        CefQuitMessageLoop();
+      }
+      g_mutex_unlock (&init_lock);
+    }
+
+    void MakeBrowser(int)
+    {
+      CefWindowInfo window_info;
+      CefRefPtr<CefBrowser> browser;
+      CefBrowserSettings browser_settings;
+
+      window_info.SetAsWindowless(0);
+      browser = CefBrowserHost::CreateBrowserSync(window_info, this, std::string(mElement->url), browser_settings, nullptr, nullptr);
+      g_mutex_lock (&init_lock);
+      g_assert (browsers < G_MAXUINT64);
+      browsers += 1;
+      g_mutex_unlock(&init_lock);
+
+      browser->GetHost()->SetAudioMuted(true);
+
+      mElement->browser = browser;
+
+      g_mutex_lock (&mElement->state_lock);
+      mElement->started = TRUE;
+      g_cond_signal (&mElement->state_cond);
+      g_mutex_unlock(&mElement->state_lock);
+    }
 
   private:
 
     CefRefPtr<CefRenderHandler> render_handler;
     CefRefPtr<CefAudioHandler> audio_handler;
-    CefRefPtr<CefRequestHandler> request_handler;
     CefRefPtr<CefDisplayHandler> display_handler;
 
   public:
@@ -376,43 +392,6 @@ class BrowserClient :
     IMPLEMENT_REFCOUNTING(BrowserClient);
 };
 
-void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
-  mElement->browser = nullptr;
-  g_mutex_lock (&mElement->state_lock);
-  mElement->started = FALSE;
-  g_cond_signal (&mElement->state_cond);
-  g_mutex_unlock(&mElement->state_lock);
-  g_mutex_lock(&init_lock);
-  g_assert (browsers > 0);
-  browsers -= 1;
-  if (browsers == 0) {
-    CefQuitMessageLoop();
-  }
-  g_mutex_unlock (&init_lock);
-}
-
-void BrowserClient::MakeBrowser(int arg)
-{
-  CefWindowInfo window_info;
-  CefRefPtr<CefBrowser> browser;
-  CefBrowserSettings browser_settings;
-
-  window_info.SetAsWindowless(0);
-  browser = CefBrowserHost::CreateBrowserSync(window_info, this, std::string(mElement->url), browser_settings, nullptr, nullptr);
-  g_mutex_lock (&init_lock);
-  g_assert (browsers < G_MAXUINT64);
-  browsers += 1;
-  g_mutex_unlock(&init_lock);
-
-  browser->GetHost()->SetAudioMuted(true);
-
-  mElement->browser = browser;
-
-  g_mutex_lock (&mElement->state_lock);
-  mElement->started = TRUE;
-  g_cond_signal (&mElement->state_cond);
-  g_mutex_unlock(&mElement->state_lock);
-}
 
 BrowserApp::BrowserApp(GstCefSrc *src) : src(src)
 {
@@ -454,7 +433,7 @@ void BrowserApp::OnScheduleMessagePumpWork(int64_t delay_ms)
 #endif
 
 void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
-                                             CefRefPtr<CefCommandLine> command_line)
+                                               CefRefPtr<CefCommandLine> command_line)
 {
     command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
     command_line->AppendSwitch("enable-media-stream");
