@@ -11,6 +11,7 @@
 #include <include/base/cef_bind.h>
 #include <include/base/cef_callback_helpers.h>
 #include <include/wrapper/cef_closure_task.h>
+#include <include/wrapper/cef_message_router.h>
 
 #include "gstcefsrc.h"
 #include "gstcefaudiometa.h"
@@ -126,6 +127,40 @@ gchar* get_plugin_base_path () {
   gst_object_unref(plugin);
   return base_path;
 }
+
+
+/** Cef Client */
+
+/** Handlers */
+
+// Handle messages in the browser process.
+class MessageHandler : public CefMessageRouterBrowserSide::Handler {
+ public:
+  explicit MessageHandler(const CefString& startup_url)
+      : startup_url_(startup_url) {}
+
+  // Called due to cefQuery execution in message_router.html.
+  bool OnQuery(CefRefPtr<CefBrowser> browser,
+               CefRefPtr<CefFrame> frame,
+               int64_t query_id,
+               const CefString& request,
+               bool persistent,
+               CefRefPtr<Callback> callback) override {
+    // Only handle messages from the startup URL.
+    const std::string& url = frame->GetURL();
+    if (url.find(startup_url_) != 0)
+      return false;
+
+    const std::string& message_name = request;
+    callback->Success(message_name + " is working");
+    return true;
+  }
+
+ private:
+  const CefString startup_url_;
+
+  DISALLOW_COPY_AND_ASSIGN(MessageHandler);
+};
 
 class RenderHandler : public CefRenderHandler
 {
@@ -301,7 +336,7 @@ class BrowserClient :
 {
   public:
 
-    BrowserClient(GstCefSrc *element) : mElement(element)
+    BrowserClient(GstCefSrc *element) : src(element)
     {
 
       this->render_handler = new RenderHandler(element);
@@ -309,6 +344,7 @@ class BrowserClient :
       this->display_handler = new DisplayHandler(element);
     }
 
+    // CefClient Methods:
     virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override
     {
       return this;
@@ -334,20 +370,48 @@ class BrowserClient :
       return display_handler;
     }
 
-    virtual void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status) override
+    bool OnProcessMessageReceived(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      CefProcessId source_process,
+      CefRefPtr<CefProcessMessage> message
+    ) override
     {
       CEF_REQUIRE_UI_THREAD();
-      GST_WARNING_OBJECT (mElement, "Render subprocess terminated, reloading URL!");
-      browser->Reload();
+
+      return browser_msg_router_->OnProcessMessageReceived(
+        browser,
+        frame,
+        source_process,
+        message
+      );
+    }
+
+    // CefLifeSpanHandler Methods:
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override
+    {
+      CEF_REQUIRE_UI_THREAD();
+
+      if (!browser_msg_router_) {
+        // Create the browser-side router for query handling.
+        CefMessageRouterConfig config;
+        config.js_query_function = "gstSendMsg";
+        config.js_cancel_function = "gstCancelMsg";
+        browser_msg_router_ = CefMessageRouterBrowserSide::Create(config);
+
+        // Register handlers with the router.
+        browser_msg_handler_.reset(new MessageHandler(src->url));
+        browser_msg_router_->AddHandler(browser_msg_handler_.get(), false);
+      }
     }
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override
     {
-      mElement->browser = nullptr;
-      g_mutex_lock (&mElement->state_lock);
-      mElement->started = FALSE;
-      g_cond_signal (&mElement->state_cond);
-      g_mutex_unlock(&mElement->state_lock);
+      src->browser = nullptr;
+      g_mutex_lock (&src->state_lock);
+      src->started = FALSE;
+      g_cond_signal (&src->state_cond);
+      g_mutex_unlock(&src->state_lock);
       g_mutex_lock(&init_lock);
       g_assert (browsers > 0);
       browsers -= 1;
@@ -357,6 +421,31 @@ class BrowserClient :
       g_mutex_unlock (&init_lock);
     }
 
+    // CefRequestHandler methods:
+    // TODO - is the ResourceRequestHandler stuff required?
+    bool OnBeforeBrowse(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      CefRefPtr<CefRequest> request,
+      bool user_gesture,
+      bool is_redirect
+    ) override
+    {
+      CEF_REQUIRE_UI_THREAD();
+
+      browser_msg_router_->OnBeforeBrowse(browser, frame);
+      return false;
+    }
+
+    virtual void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status) override
+    {
+      CEF_REQUIRE_UI_THREAD();
+      GST_WARNING_OBJECT (src, "Render subprocess terminated, reloading URL!");
+      browser_msg_router_->OnRenderProcessTerminated(browser);
+      browser->Reload();
+    }
+
+    // Custom methods:
     void MakeBrowser(int)
     {
       CefWindowInfo window_info;
@@ -364,7 +453,14 @@ class BrowserClient :
       CefBrowserSettings browser_settings;
 
       window_info.SetAsWindowless(0);
-      browser = CefBrowserHost::CreateBrowserSync(window_info, this, std::string(mElement->url), browser_settings, nullptr, nullptr);
+      browser = CefBrowserHost::CreateBrowserSync(
+        window_info,
+        this,
+        std::string(src->url),
+        browser_settings,
+        nullptr,
+        nullptr
+      );
       g_mutex_lock (&init_lock);
       g_assert (browsers < G_MAXUINT64);
       browsers += 1;
@@ -372,26 +468,31 @@ class BrowserClient :
 
       browser->GetHost()->SetAudioMuted(true);
 
-      mElement->browser = browser;
+      src->browser = browser;
 
-      g_mutex_lock (&mElement->state_lock);
-      mElement->started = TRUE;
-      g_cond_signal (&mElement->state_cond);
-      g_mutex_unlock(&mElement->state_lock);
+      g_mutex_lock (&src->state_lock);
+      src->started = TRUE;
+      g_cond_signal (&src->state_cond);
+      g_mutex_unlock(&src->state_lock);
     }
 
   private:
+    // Handles the browser side of query routing.
+    CefRefPtr<CefMessageRouterBrowserSide> browser_msg_router_;
+    std::unique_ptr<CefMessageRouterBrowserSide::Handler> browser_msg_handler_;
 
     CefRefPtr<CefRenderHandler> render_handler;
     CefRefPtr<CefAudioHandler> audio_handler;
     CefRefPtr<CefDisplayHandler> display_handler;
 
   public:
-    GstCefSrc *mElement;
+    GstCefSrc *src;
 
     IMPLEMENT_REFCOUNTING(BrowserClient);
 };
 
+
+/** Browser App methods */
 
 BrowserApp::BrowserApp(GstCefSrc *src) : src(src)
 {
@@ -479,6 +580,9 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
       g_strfreev (flags_list);
     }
 }
+
+
+/** cefsrc (Gstreamer) methods */
 
 static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
 {
