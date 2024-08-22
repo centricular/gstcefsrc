@@ -166,8 +166,8 @@ class RenderHandler : public CefRenderHandler
 {
   public:
 
-    RenderHandler(GstCefSrc *element) :
-        element (element)
+    RenderHandler(GstCefSrc *src) :
+        src (src)
     {
     }
 
@@ -177,32 +177,32 @@ class RenderHandler : public CefRenderHandler
 
     void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect &rect) override
     {
-	  GST_LOG_OBJECT(element, "getting view rect");
-      GST_OBJECT_LOCK (element);
-      rect = CefRect(0, 0, element->vinfo.width ? element->vinfo.width : DEFAULT_WIDTH, element->vinfo.height ? element->vinfo.height : DEFAULT_HEIGHT);
-      GST_OBJECT_UNLOCK (element);
+	  GST_LOG_OBJECT(src, "getting view rect");
+      GST_OBJECT_LOCK (src);
+      rect = CefRect(0, 0, src->vinfo.width ? src->vinfo.width : DEFAULT_WIDTH, src->vinfo.height ? src->vinfo.height : DEFAULT_HEIGHT);
+      GST_OBJECT_UNLOCK (src);
     }
 
     void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList &dirtyRects, const void * buffer, int w, int h) override
     {
       GstBuffer *new_buffer;
 
-      GST_LOG_OBJECT (element, "painting, width / height: %d %d", w, h);
+      GST_LOG_OBJECT (src, "painting, width / height: %d %d", w, h);
 
-      new_buffer = gst_buffer_new_allocate (NULL, element->vinfo.width * element->vinfo.height * 4, NULL);
+      new_buffer = gst_buffer_new_allocate (NULL, src->vinfo.width * src->vinfo.height * 4, NULL);
       gst_buffer_fill (new_buffer, 0, buffer, w * h * 4);
 
-      GST_OBJECT_LOCK (element);
-      gst_buffer_replace (&(element->current_buffer), new_buffer);
+      GST_OBJECT_LOCK (src);
+      gst_buffer_replace (&(src->current_buffer), new_buffer);
       gst_buffer_unref (new_buffer);
-      GST_OBJECT_UNLOCK (element);
+      GST_OBJECT_UNLOCK (src);
 
-      GST_LOG_OBJECT (element, "done painting");
+      GST_LOG_OBJECT (src, "done painting");
     }
 
   private:
 
-    GstCefSrc *element;
+    GstCefSrc *src;
 
     IMPLEMENT_REFCOUNTING(RenderHandler);
 };
@@ -211,8 +211,8 @@ class AudioHandler : public CefAudioHandler
 {
   public:
 
-    AudioHandler(GstCefSrc *element) :
-        mElement (element)
+    AudioHandler(GstCefSrc *src) :
+        src (src)
     {
     }
 
@@ -233,9 +233,9 @@ class AudioHandler : public CefAudioHandler
     mRate = params.sample_rate;
     mChannels = channels;
 
-    GST_OBJECT_LOCK (mElement);
-    mElement->audio_events = g_list_append (mElement->audio_events, event);
-    GST_OBJECT_UNLOCK (mElement);
+    GST_OBJECT_LOCK (src);
+    src->audio_events = g_list_append (src->audio_events, event);
+    GST_OBJECT_UNLOCK (src);
   }
 
   void OnAudioStreamPacket(CefRefPtr<CefBrowser> browser,
@@ -247,7 +247,7 @@ class AudioHandler : public CefAudioHandler
     GstMapInfo info;
     gint i, j;
 
-    GST_LOG_OBJECT (mElement, "Handling audio stream packet with %d frames", frames);
+    GST_LOG_OBJECT (src, "Handling audio stream packet with %d frames", frames);
 
     buf = gst_buffer_new_allocate (NULL, mChannels * frames * 4, NULL);
 
@@ -261,18 +261,18 @@ class AudioHandler : public CefAudioHandler
     }
     gst_buffer_unmap (buf, &info);
 
-    GST_OBJECT_LOCK (mElement);
+    GST_OBJECT_LOCK (src);
 
     GST_BUFFER_DURATION (buf) = gst_util_uint64_scale (frames, GST_SECOND, mRate);
 
-    if (!mElement->audio_buffers) {
-      mElement->audio_buffers = gst_buffer_list_new();
+    if (!src->audio_buffers) {
+      src->audio_buffers = gst_buffer_list_new();
     }
 
-    gst_buffer_list_add (mElement->audio_buffers, buf);
-    GST_OBJECT_UNLOCK (mElement);
+    gst_buffer_list_add (src->audio_buffers, buf);
+    GST_OBJECT_UNLOCK (src);
 
-    GST_LOG_OBJECT (mElement, "Handled audio stream packet");
+    GST_LOG_OBJECT (src, "Handled audio stream packet");
   }
 
   void OnAudioStreamStopped(CefRefPtr<CefBrowser> browser) override
@@ -281,12 +281,12 @@ class AudioHandler : public CefAudioHandler
 
   void OnAudioStreamError(CefRefPtr<CefBrowser> browser,
                           const CefString& message) override {
-    GST_WARNING_OBJECT (mElement, "Audio stream error: %s", message.ToString().c_str());
+    GST_WARNING_OBJECT (src, "Audio stream error: %s", message.ToString().c_str());
   }
 
   private:
 
-    GstCefSrc *mElement;
+    GstCefSrc *src;
     gint mRate;
     gint mChannels;
     IMPLEMENT_REFCOUNTING(AudioHandler);
@@ -294,7 +294,7 @@ class AudioHandler : public CefAudioHandler
 
 class DisplayHandler : public CefDisplayHandler {
 public:
-  DisplayHandler(GstCefSrc *element) : mElement(element) {}
+  DisplayHandler(GstCefSrc *src) : src(src) {}
 
   ~DisplayHandler() = default;
 
@@ -319,13 +319,13 @@ public:
       gst_level = GST_LEVEL_NONE;
       break;
     };
-    GST_CAT_LEVEL_LOG (cef_console_debug, gst_level, mElement, "%s:%d %s", source.ToString().c_str(), line,
+    GST_CAT_LEVEL_LOG (cef_console_debug, gst_level, src, "%s:%d %s", source.ToString().c_str(), line,
       message.ToString().c_str());
     return false;
   }
 
 private:
-  GstCefSrc *mElement;
+  GstCefSrc *src;
   IMPLEMENT_REFCOUNTING(DisplayHandler);
 };
 
@@ -336,12 +336,12 @@ class BrowserClient :
 {
   public:
 
-    BrowserClient(GstCefSrc *element) : src(element)
+    BrowserClient(GstCefSrc *src) : src(src)
     {
 
-      this->render_handler = new RenderHandler(element);
-      this->audio_handler = new AudioHandler(element);
-      this->display_handler = new DisplayHandler(element);
+      this->render_handler = new RenderHandler(src);
+      this->audio_handler = new AudioHandler(src);
+      this->display_handler = new DisplayHandler(src);
     }
 
     // CefClient Methods:
@@ -422,7 +422,6 @@ class BrowserClient :
     }
 
     // CefRequestHandler methods:
-    // TODO - is the ResourceRequestHandler stuff required?
     bool OnBeforeBrowse(
       CefRefPtr<CefBrowser> browser,
       CefRefPtr<CefFrame> frame,
@@ -758,7 +757,7 @@ done:
 }
 
 static GstStateChangeReturn
-gst_cef_src_change_state(GstElement *element, GstStateChange transition)
+gst_cef_src_change_state(GstElement *src, GstStateChange transition)
 {
   GstStateChangeReturn result = GST_STATE_CHANGE_SUCCESS;
 
@@ -780,16 +779,16 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
       /* in the main thread as per Cocoa */
       if (pthread_main_np()) {
         g_mutex_unlock (&init_lock);
-        run_cef ((GstCefSrc*) element);
+        run_cef ((GstCefSrc*) src);
         g_mutex_lock (&init_lock);
       } else {
-        dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)element, (dispatch_function_t)&run_cef);
+        dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)src, (dispatch_function_t)&run_cef);
         while (cef_status == CEF_STATUS_INITIALIZING)
           g_cond_wait (&init_cond, &init_lock);
       }
 #else
         /* in a separate UI thread */
-      thread = g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, (GstCefSrc*)element);
+      thread = g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, (GstCefSrc*)src);
       while (cef_status == CEF_STATUS_INITIALIZING)
         g_cond_wait (&init_cond, &init_lock);
 #endif
@@ -821,7 +820,7 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
         gst_cef_shutdown (nullptr);
         g_mutex_lock (&init_lock);
       } else {
-        dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)element, (dispatch_function_t)&gst_cef_shutdown);
+        dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)src, (dispatch_function_t)&gst_cef_shutdown);
         while (cef_status == CEF_STATUS_SHUTTING_DOWN)
           g_cond_wait (&init_cond, &init_lock);
       }
@@ -842,7 +841,7 @@ gst_cef_src_change_state(GstElement *element, GstStateChange transition)
   }
 
   if (result == GST_STATE_CHANGE_FAILURE) return result;
-  result = GST_ELEMENT_CLASS(parent_class)->change_state(element, transition);
+  result = GST_ELEMENT_CLASS(parent_class)->change_state(src, transition);
 
   return result;
 }
@@ -1209,7 +1208,8 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
-      "Creates a video stream from an embedded Chromium browser", "Mathieu Duponchelle <mathieu@centricular.com>");
+      "Creates a video stream from an embedded Chromium browser",
+      "Mathieu Duponchelle <mathieu@centricular.com>");
 
   gst_element_class_add_static_pad_template (gstelement_class,
       &gst_cef_src_template);
