@@ -29,6 +29,20 @@ G_BEGIN_DECLS
 typedef struct _GstCefSrc GstCefSrc;
 typedef struct _GstCefSrcClass GstCefSrcClass;
 
+typedef enum : guint8 {
+  // browser app not yet initialized
+  CEF_SRC_CLOSED            = 0,
+  // browser app initialized
+  CEF_SRC_OPEN              = 1,
+  // following states only possible if `listen_for_js_signals`:
+  // waiting for CEF browser to send "ready" message (using window.gstSendMsg)
+  CEF_SRC_WAITING_FOR_READY = 2,
+  // received ready signal from webpage
+  CEF_SRC_READY             = 3,
+} CefSrcState;
+
+#define CefSrcStateIsOpen(state) (state >= CEF_SRC_OPEN)
+
 struct _GstCefSrc {
   GstPushSrc parent;
   GstBuffer *current_buffer;
@@ -44,13 +58,14 @@ struct _GstCefSrc {
   gchar *cef_cache_location;
   gboolean gpu;
   gboolean sandbox;
+  gboolean listen_for_js_signals;
   gint chromium_debug_port;
   CefRefPtr<CefBrowser> browser;
   CefRefPtr<CefApp> app;
 
   GCond state_cond;
   GMutex state_lock;
-  gboolean started;
+  CefSrcState state;
 };
 
 struct _GstCefSrcClass {
