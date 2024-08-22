@@ -1,0 +1,90 @@
+<html>
+  <head>
+    <title>Signals Sample</title>
+    <script language="JavaScript">
+      const tStart = 3; // s
+      const tBad = 1; // s
+      const tDur = 5; // s
+      const dt = 0.1; // s
+      let time = 0;
+      let remTime = tStart + tDur;
+
+      function sendMessage(msg) {
+        // Send "command" to renderer process in CEF, which gets routed to
+        // the main thread
+        window.gstSendMsg({
+          request: msg,
+          onSuccess: function(response) {
+            try {
+              const json = JSON.parse(response);
+              showResult(json, false);
+              if (json && json.success && json.cmd === "ready") {
+                console.log("sending eos signal in 5s...");
+                setTimeout(() => {
+                  console.log("sending eos signal");
+                  sendMessage("eos");
+                }, tDur * 1000);
+              }
+            } catch (e) {
+              console.error("parse error", e);
+            }
+          },
+          onFailure: function(error_code, error_message) {
+            try {
+              const json = JSON.parse(error_message);
+              showResult(json, true);
+            } catch (e) {
+            console.error("parse error", e);
+            }
+          }
+        });
+      }
+
+      function showResult(resultJson, isError) {
+        document.getElementById("result").innerHTML +=
+          "<br />" + `${isError ? "error" : "response"} at ${time.toFixed(1)}s: ` + "<br />" +
+          JSON.stringify(resultJson, null, 4);
+      }
+
+      console.log("sending 'ready' signal in 3s...");
+      setTimeout(() => {
+        console.log("sending 'ready' signal");
+        sendMessage("ready");
+      }, tStart * 1000);
+
+      setTimeout(() => {
+        console.log("sending test 'bad' signal");
+        sendMessage("bad");
+      }, (tStart + tBad) * 1000);
+
+      setInterval(() => {
+        document.getElementById("timer").innerHTML =
+          `countdown: ${remTime.toFixed(1)}s` +  "<br />" +
+          `running: ${time.toFixed(1)}s`;
+
+        time += dt;
+        remTime -= dt;
+      }, dt * 1000);
+    </script>
+  </head>
+  <body
+    style="
+      overflow: hidden;
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      justify-content: center;
+      align-items: center;
+      background-color: white;
+    "
+  >
+    <div id="result" style="background-color: aqua; width: 30%; text-align: center;">
+      Responses:
+    </div>
+    <div id="timer" style="background-color: hotpink; width: 30%; text-align: center;"></div>
+    </div>
+  </body>
+</html>
