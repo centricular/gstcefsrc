@@ -1,29 +1,93 @@
 <html>
   <head>
     <title>Signals Sample</title>
+    <style>
+      body {
+        overflow: hidden;
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .wrapper {
+        width: 30%;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        justify-content: center;
+        align-items: center;
+        background-color: white;
+      }
+
+      .container {
+        width: 100%;
+        text-align: left;
+        font-size: large;
+        font-weight: bold;
+        padding: 1rem;
+      }
+
+      .result {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        padding: 1rem;
+      }
+
+      .result-title {
+        font-weight: bold;
+        font-size: medium;
+      }
+      .result-text {
+        font-weight: normal;
+        font-size: medium;
+      }
+
+      .progress-bar {
+        width: 80%;
+        margin-top: 1rem;
+        background-color: #e0e0e0;
+        border-radius: 3px;
+        box-shadow: inset 0 1px 3px rgba(0, 0, 0, .2);
+      }
+
+      .progress-bar-fill {
+        display: block;
+        height: 22px;
+        background-color: #659cef;
+        border-radius: 3px;
+
+        transition: width 100ms ease-out;
+      }
+    </style>
     <script language="JavaScript">
       const tStart = 3; // s
       const tBad = 1; // s
       const tDur = 5; // s
       const dt = 0.1; // s
+      const totalTime = tStart + tDur;
       let time = 0;
-      let remTime = tStart + tDur;
+      let remTime = totalTime;
 
       function sendMessage(msg) {
         // Send "command" to renderer process in CEF, which gets routed to
         // the main thread
+        const signals = document.getElementById("signals");
+        const response = document.getElementById("response");
+
+        showResult(signals, msg, "msg");
+
         window.gstSendMsg({
           request: msg,
           onSuccess: function(response) {
             try {
               const json = JSON.parse(response);
-              showResult(json, false);
+              showResult(response, json, "response");
               if (json && json.success && json.cmd === "ready") {
-                console.log("sending eos signal in 5s...");
-                setTimeout(() => {
-                  console.log("sending eos signal");
-                  sendMessage("eos");
-                }, tDur * 1000);
+                console.log("got response to READY from cefsrc");
               }
             } catch (e) {
               console.error("parse error", e);
@@ -32,7 +96,7 @@
           onFailure: function(error_code, error_message) {
             try {
               const json = JSON.parse(error_message);
-              showResult(json, true);
+              showResult(response, JSON.stringify(json), "error");
             } catch (e) {
             console.error("parse error", e);
             }
@@ -40,17 +104,25 @@
         });
       }
 
-      function showResult(resultJson, isError) {
-        document.getElementById("result").innerHTML +=
-          "<br />" + `${isError ? "error" : "response"} at ${time.toFixed(1)}s: ` + "<br />" +
-          JSON.stringify(resultJson, null, 4);
+      function showResult(element, msg, title) {
+        element.innerHTML +=
+          "<br />" +
+          `<div class="result">` +
+            `<div class="result-title">${title} at ${(time + dt).toFixed(1)}s: </div>` +
+            `<div class="result-text">${msg}</div>` +
+          `</div>`;
       }
 
-      console.log("sending 'ready' signal in 3s...");
+      console.log(`sending 'ready' signal in ${tStart}s...`);
       setTimeout(() => {
         console.log("sending 'ready' signal");
         sendMessage("ready");
       }, tStart * 1000);
+
+      setTimeout(() => {
+        console.log("sending eos signal");
+        sendMessage("eos");
+      }, (tStart + tDur) * 1000);
 
       setTimeout(() => {
         console.log("sending test 'bad' signal");
@@ -61,30 +133,26 @@
         document.getElementById("timer").innerHTML =
           `countdown: ${remTime.toFixed(1)}s` +  "<br />" +
           `running: ${time.toFixed(1)}s`;
+        document.getElementById("progress").style.width =
+          `${Math.max((remTime / totalTime), 0) * 100}%`;
 
         time += dt;
         remTime -= dt;
       }, dt * 1000);
     </script>
   </head>
-  <body
-    style="
-      overflow: hidden;
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-      justify-content: center;
-      align-items: center;
-      background-color: white;
-    "
-  >
-    <div id="result" style="background-color: aqua; width: 30%; text-align: center;">
-      Responses:
-    </div>
-    <div id="timer" style="background-color: hotpink; width: 30%; text-align: center;"></div>
+  <body>
+    <div class="wrapper">
+      <div id="signals" class="container" style="background-color: #32a852;">
+        Signals:
+      </div>
+      <div id="response" class="container" style="background-color: #8c8edb;">
+        Responses:
+      </div>
+      <div id="timer" class="container" style="background-color: #ff775c;"></div>
+      <div class="progress-bar">
+        <span id="progress" class="progress-bar-fill" style="width: 100%;"></span>
+      </div>
     </div>
   </body>
 </html>
