@@ -23,6 +23,16 @@
 #include "gstcefnsapplication.h"
 #endif
 
+#define GST_ELEMENT_PROGRESS(el, type, code, text)      \
+G_STMT_START {                                          \
+  gchar *__txt = _gst_element_error_printf text;        \
+  gst_element_post_message (GST_ELEMENT_CAST (el),      \
+      gst_message_new_progress (GST_OBJECT_CAST (el),   \
+          GST_PROGRESS_TYPE_ ##type, code, __txt));     \
+  g_free (__txt);                                       \
+} G_STMT_END
+
+
 GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define GST_CAT_DEFAULT cef_src_debug
 
@@ -900,7 +910,11 @@ gst_cef_src_start(GstBaseSrc *base_src)
 {
   gboolean ret = FALSE;
   GstCefSrc *src = GST_CEF_SRC (base_src);
+
+  GST_ELEMENT_PROGRESS(src, START, "open", ("Creating CEF browser client"));
+
   CefRefPtr<BrowserClient> browserClient = new BrowserClient(src);
+  gulong browser_id = browsers;
 
   /* Make sure CEF is initialized before posting a task */
   g_mutex_lock (&init_lock);
@@ -908,12 +922,17 @@ gst_cef_src_start(GstBaseSrc *base_src)
     g_cond_wait (&init_cond, &init_lock);
   g_mutex_unlock (&init_lock);
 
-  if (cef_status == CEF_STATUS_FAILURE)
+  if (cef_status == CEF_STATUS_FAILURE) {
+    GST_ELEMENT_PROGRESS(src, ERROR, "open", ("CEF in failed state"));
     goto done;
+  }
 
   GST_OBJECT_LOCK (src);
   src->n_frames = 0;
   GST_OBJECT_UNLOCK (src);
+
+  GST_ELEMENT_PROGRESS(src, CONTINUE, "open", ("Creating CEF browser (#%lu)...", browser_id));
+
 #ifdef __APPLE__
   if (pthread_main_np()) {
     /* in the main thread as per Cocoa */
@@ -923,6 +942,8 @@ gst_cef_src_start(GstBaseSrc *base_src)
     CefPostTask(TID_UI, base::BindOnce(&BrowserClient::MakeBrowser, browserClient.get(), 0));
 
     /* And wait for this src's browser to have been created */
+    GST_ELEMENT_PROGRESS(src, CONTINUE, "open", ("Waiting for CEF browser initialization..."));
+
     g_mutex_lock(&src->state_lock);
     while (!CefSrcStateIsOpen(src->state))
       g_cond_wait (&src->state_cond, &src->state_lock);
@@ -930,6 +951,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
 #ifdef __APPLE__
   }
 #endif
+
 
   if (src->listen_for_js_signals) {
     g_mutex_lock (&src->state_lock);
@@ -939,6 +961,18 @@ gst_cef_src_start(GstBaseSrc *base_src)
   }
 
   ret = src->browser != NULL;
+
+  if (ret) {
+    GST_ELEMENT_PROGRESS(
+      src, COMPLETE, "open",
+      ("CEF browser created (#%lu)", browser_id)
+    );
+  } else {
+    GST_ELEMENT_PROGRESS(
+      src, ERROR, "open",
+      ("CEF browser failed to create (#%lu)", browser_id)
+    );
+  }
 
 done:
   return ret;
