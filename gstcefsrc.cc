@@ -1288,7 +1288,10 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
           DEFAULT_SANDBOX, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
   g_object_class_install_property (gobject_class, PROP_LISTEN_FOR_JS_SIGNAL,
     g_param_spec_boolean ("listen-for-js-signals", "listen-for-js-signals",
-          "Listen and respond to signals sent from javascript: window.gstSendMsg({request: \"ready|eos\", ...})",
+          "Listen and respond to signals sent from javascript: "
+          "window.gstSendMsg({request: \"ready|eos\", ...}) - "
+          "see [README](https://github.com/centricular/gstcefsrc?tab=readme-ov-file#javascript-signals) "
+          "for more detail",
           DEFAULT_LISTEN_FOR_JS_SIGNALS, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_JS_FLAGS,

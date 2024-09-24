@@ -63,7 +63,7 @@ first be turned into a macOS app. To do this, you can follow these steps:
 </plist>
 ```
 
-After this, you can run the steps below, replacing `gst-launch-1.0` with 
+After this, you can run the steps below, replacing `gst-launch-1.0` with
 `<path to GStreamer.framework/Versions/1.0>/bin/gst-launch-1.0.app/Contents/MacOS/gst-launch-1.0`.
 
 ## Run
@@ -118,7 +118,7 @@ gst-launch-1.0 playbin uri=web+https://www.soundcloud.com/platform/sama
 
 ## Docker GPU Acceleration
 
-This is simply a hint/note for those who want to use this plugin in a docker container with GPU acceleration. Your particular setup may vary. The following was tested on Ubuntu 22.04 with a Nvidia GPU. This assumes you have installed the Nvidia drivers, docker, and the Nvidia Container Toolkit. You may also need to configure your xorg.conf within the container to use the Nvidia GPU. 
+This is simply a hint/note for those who want to use this plugin in a docker container with GPU acceleration. Your particular setup may vary. The following was tested on Ubuntu 22.04 with a Nvidia GPU. This assumes you have installed the Nvidia drivers, docker, and the Nvidia Container Toolkit. You may also need to configure your xorg.conf within the container to use the Nvidia GPU.
 
 - xserver-xorg-video-dummy is required in the container
 
@@ -130,7 +130,7 @@ docker run --gpus all -v /usr/local/cuda:/usr/local/cuda --device=/dev/dri/card0
 ```
 
 Inside the container run:
-    
+
 ``` shell
 Xorg -noreset +extension GLX +extension RANDR \+extension RENDER -logfile ./xserver.log vt1 :1 &
 ```
@@ -146,3 +146,43 @@ chrome-extra-flags="use-gl=egl, enable-gpu-rasterization,ignore-gpu-blocklist" \
 ```
 
 It is also helpful to run nvidia-smi or nvtop to verify the GPU is being used. Note it is possible to use the GPU within a kube pod as well. This has been tested and runs in a production environment on GKE using Container Optimized OS.
+
+## Javascript Signals
+
+There is an optional feature in the cefsrc element that allows the webpage to send signals to
+cefsrc:
+
+- "ready" - signals that the page content is ready to be rendered, and the src will then start
+  capturing and pushing buffers
+- "eos" - signals that the webpage has no more content and to push an EOS event out on the
+  cefsrc's src pad
+
+Two methods are attached to the javascript global `window` object: `gstSendMsg` and
+`gstCancelMsg`. For example, here is how you would send the "ready" signal:
+
+```js
+window.gstSendMsg({
+  request: "ready",
+  onSuccess: function(response) {
+    try {
+      const json = JSON.parse(response);
+      showResult(response, json, "response");
+      if (json && json.success) {
+        // message processed by cefsrc successfully
+      }
+    } catch (e) {
+      console.error("parse error", e);
+    }
+  },
+  onFailure: function(error_code, error_message) {
+    try {
+      const json = JSON.parse(error_message);
+      showResult(response, JSON.stringify(json), "error");
+    } catch (e) {
+    console.error("parse error", e);
+    }
+  }
+});
+```
+
+Refer to the [sample html page](html/ready_test.html) for more detail.
