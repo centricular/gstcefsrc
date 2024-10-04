@@ -600,15 +600,17 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
     command_line->AppendSwitch("enable-begin-frame-scheduling"); /* https://bitbucket.org/chromiumembedded/cef/issues/1368 */
 
+    bool gpu = src->gpu || (!!g_getenv ("GST_CEF_GPU_ENABLED"));
+
 #ifdef __APPLE__
     command_line->AppendSwitch("off-screen-rendering-enabled");
-    if (src->gpu) {
+    if (gpu) {
       GST_WARNING_OBJECT(src, "GPU rendering is known not to work on macOS. Disabling it now. See https://github.com/chromiumembedded/cef/issues/3322 and https://magpcss.org/ceforum/viewtopic.php?f=6&t=19397");
-      src->gpu = FALSE;
+      gpu = FALSE;
     }
 #endif
 
-    if (!src->gpu) {
+    if (!gpu) {
       // Optimize for no gpu usage
       command_line->AppendSwitch("disable-gpu");
       command_line->AppendSwitch("disable-gpu-compositing");
@@ -618,8 +620,13 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
       command_line->AppendSwitchWithValue("remote-debugging-port", g_strdup_printf ("%i", src->chromium_debug_port));
     }
 
-    if (src->chrome_extra_flags) {
-      gchar **flags_list = g_strsplit ((const gchar *) src->chrome_extra_flags, ",", -1);
+    const gchar *extra_flags = src->chrome_extra_flags;
+    if (!extra_flags) {
+      extra_flags = g_getenv ("GST_CEF_CHROME_EXTRA_FLAGS");
+    }
+
+    if (extra_flags) {
+      gchar **flags_list = g_strsplit (extra_flags, ",", -1);
       guint i;
 
       for (i = 0; i < g_strv_length (flags_list); i++) {
@@ -1120,17 +1127,32 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       break;
     }
     case PROP_CHROME_EXTRA_FLAGS: {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc chrome-extra-flags property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_CHROME_EXTRA_FLAGS instead"
+      );
       g_free (src->chrome_extra_flags);
       src->chrome_extra_flags = g_value_dup_string (value);
       break;
     }
     case PROP_GPU:
     {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc gpu property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_GPU_ENABLED instead"
+      );
       src->gpu = g_value_get_boolean (value);
       break;
     }
     case PROP_CHROMIUM_DEBUG_PORT:
     {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc chromium-debug-port property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_CHROME_EXTRA_FLAGS instead"
+      );
       src->chromium_debug_port = g_value_get_int (value);
       break;
     }
@@ -1267,19 +1289,21 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_GPU,
     g_param_spec_boolean ("gpu", "gpu",
-          "Enable GPU usage in chromium (Improves performance if you have GPU)",
+          "Enable GPU usage in chromium (Improves performance if you have GPU) - "
+          "deprecated: set GST_CEF_GPU_ENABLED in the environment instead",
           DEFAULT_GPU, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_CHROMIUM_DEBUG_PORT,
     g_param_spec_int ("chromium-debug-port", "chromium-debug-port",
-          "Set chromium debug port (-1 = disabled) "
-          "deprecated: use chrome-extra-flags instead", -1, G_MAXUINT16,
+          "Set chromium debug port (-1 = disabled) - "
+          "deprecated: set GST_CEF_CHROME_EXTRA_FLAGS in the environment instead", -1, G_MAXUINT16,
           DEFAULT_CHROMIUM_DEBUG_PORT, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_CHROME_EXTRA_FLAGS,
     g_param_spec_string ("chrome-extra-flags", "chrome-extra-flags",
           "Comma delimiter flags to be passed into chrome "
-          "(Example: show-fps-counter,remote-debugging-port=9222)",
+          "(Example: show-fps-counter,remote-debugging-port=9222) - "
+          "deprecated: set GST_CEF_CHROME_EXTRA_FLAGS in the environment instead",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_SANDBOX,
