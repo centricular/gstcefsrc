@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <glib.h>
 #include <sstream>
 #include <string>
 
@@ -83,24 +84,37 @@ static GThread *thread = nullptr;
   (gst_cef_log_severity_mode_get_type ())
 
 
+static const GEnumValue log_severity_values[] = {
+  {LOGSEVERITY_DEBUG, "debug / verbose cef log severity", "debug"},
+  {LOGSEVERITY_INFO, "info cef log severity", "info"},
+  {LOGSEVERITY_WARNING, "warning cef log severity", "warning"},
+  {LOGSEVERITY_ERROR, "error cef log severity", "error"},
+  {LOGSEVERITY_FATAL, "fatal cef log severity", "fatal"},
+  {LOGSEVERITY_DISABLE, "disable cef log severity", "disable"},
+  {0, NULL, NULL},
+};
+
 static GType
 gst_cef_log_severity_mode_get_type (void)
 {
   static GType type = 0;
-  static const GEnumValue values[] = {
-    {LOGSEVERITY_DEBUG, "debug / verbose cef log severity", "debug"},
-    {LOGSEVERITY_INFO, "info cef log severity", "info"},
-    {LOGSEVERITY_WARNING, "warning cef log severity", "warning"},
-    {LOGSEVERITY_ERROR, "error cef log severity", "error"},
-    {LOGSEVERITY_FATAL, "fatal cef log severity", "fatal"},
-    {LOGSEVERITY_DISABLE, "disable cef log severity", "disable"},
-    {0, NULL, NULL},
-  };
-
   if (!type) {
-    type = g_enum_register_static ("GstCefLogSeverityMode", values);
+    type = g_enum_register_static ("GstCefLogSeverityMode", log_severity_values);
   }
   return type;
+}
+
+static gint gst_cef_log_severity_from_str (const gchar *str)
+{
+  for (guint i = 0; i < sizeof(log_severity_values) / sizeof(GEnumValue); i++) {
+    const gchar *nick = log_severity_values[i].value_nick;
+    if (!nick) break;
+    if (g_str_equal(str, nick)) {
+      return log_severity_values[i].value;
+    }
+  }
+
+  return -1;
 }
 
 enum
@@ -670,7 +684,7 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
  * concurrent cefsrc instances.
  */
 static gpointer
-run_cef (GstCefSrc *src)
+init_cef (GstCefSrc *src)
 {
 #ifdef G_OS_WIN32
   HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -684,9 +698,31 @@ run_cef (GstCefSrc *src)
   CefWindowInfo window_info;
   CefBrowserSettings browserSettings;
 
-  settings.no_sandbox = !src->sandbox;
+  // pull in parameters from gst properties (deprecated) or environment
+  cef_log_severity_t log_severity = src->log_severity;
+  const gchar* log_severity_env = g_getenv ("GST_CEF_LOG_SEVERITY");
+  if (log_severity_env) {
+    gint severity = gst_cef_log_severity_from_str(log_severity_env);
+    if (severity >= 0) {
+      log_severity = (cef_log_severity_t) severity;
+    }
+  }
+
+  const gchar *js_flags = src->js_flags;
+  if (!js_flags) {
+    js_flags = g_getenv ("GST_CEF_JS_FLAGS");
+  }
+
+  const gchar *cef_cache_location = src->cef_cache_location;
+  if (!cef_cache_location) {
+    cef_cache_location = g_getenv ("GST_CEF_CACHE_LOCATION");
+  }
+
+  bool sandbox = src->gpu || (!!g_getenv ("GST_CEF_SANDBOX"));
+
+  settings.no_sandbox = !sandbox;
   settings.windowless_rendering_enabled = true;
-  settings.log_severity = src->log_severity;
+  settings.log_severity = log_severity;
   settings.multi_threaded_message_loop = false;
 #ifdef __APPLE__
   settings.external_message_pump = true;
@@ -749,12 +785,12 @@ run_cef (GstCefSrc *src)
   gchar *locales_dir_path = g_build_filename(base_path, "locales", nullptr);
   CefString(&settings.locales_dir_path).FromASCII(locales_dir_path);
 
-  if (src->js_flags != NULL) {
-    CefString(&settings.javascript_flags).FromASCII(src->js_flags);
+  if (js_flags != NULL) {
+    CefString(&settings.javascript_flags).FromASCII(js_flags);
   }
 
-  if (src->cef_cache_location != NULL) {
-    CefString(&settings.cache_path).FromASCII(src->cef_cache_location);
+  if (cef_cache_location != NULL) {
+    CefString(&settings.cache_path).FromASCII(cef_cache_location);
   }
 
   g_free(base_path);
@@ -818,7 +854,7 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
       }
 #else
         /* in a separate UI thread */
-      thread = g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, (GstCefSrc*)src);
+      thread = g_thread_new("cef-ui-thread", (GThreadFunc) init_cef, (GstCefSrc*)src);
       while (cef_status == CEF_STATUS_INITIALIZING)
         g_cond_wait (&init_cond, &init_lock);
 #endif
@@ -1089,6 +1125,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
     }
     case PROP_SANDBOX:
     {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc sandbox property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_SANDBOX instead"
+      );
       src->sandbox = g_value_get_boolean (value);
       break;
     }
@@ -1097,16 +1138,34 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->listen_for_js_signals = g_value_get_boolean (value);
       break;
     }
-    case PROP_JS_FLAGS: {
+    case PROP_JS_FLAGS:
+    {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc js-flags property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_JS_FLAGS instead"
+      );
       g_free (src->js_flags);
       src->js_flags = g_value_dup_string (value);
       break;
     }
-    case PROP_LOG_SEVERITY: {
+    case PROP_LOG_SEVERITY:
+    {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc log-severity property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_LOG_SEVERITY instead"
+      );
       src->log_severity = (cef_log_severity_t) g_value_get_enum (value);
       break;
     }
-    case PROP_CEF_CACHE_LOCATION: {
+    case PROP_CEF_CACHE_LOCATION:
+    {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc cef-cache-location property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_CACHE_LOCATION instead"
+      );
       g_free (src->cef_cache_location);
       src->cef_cache_location = g_value_dup_string (value);
       break;
@@ -1239,7 +1298,8 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_SANDBOX,
     g_param_spec_boolean ("sandbox", "sandbox",
-          "Toggle chromium sandboxing capabilities",
+          "Toggle chromium sandboxing capabilities - "
+          "deprecated: set GST_CEF_SANDBOX in the environment instead",
           DEFAULT_SANDBOX, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
   g_object_class_install_property (gobject_class, PROP_LISTEN_FOR_JS_SIGNAL,
     g_param_spec_boolean ("listen-for-js-signals", "listen-for-js-signals",
@@ -1252,19 +1312,22 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
   g_object_class_install_property (gobject_class, PROP_JS_FLAGS,
     g_param_spec_string ("js-flags", "js-flags",
           "Space delimited JavaScript flags to be passed to Chromium "
-          "(Example: --noexpose_wasm --expose-gc)",
+          "(Example: --noexpose_wasm --expose-gc) - "
+          "deprecated: set GST_CEF_JS_FLAGS in the environment instead",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_LOG_SEVERITY,
       g_param_spec_enum ("log-severity", "log-severity",
-          "CEF log severity level",
+          "CEF log severity level - "
+          "deprecated: set GST_CEF_LOG_SEVERITY in the environment instead",
           GST_TYPE_CEF_LOG_SEVERITY_MODE, DEFAULT_LOG_SEVERITY,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_CEF_CACHE_LOCATION,
     g_param_spec_string ("cef-cache-location", "cef-cache-location",
           "Cache location for CEF. Defaults to in memory cache. "
-          "(Example: /tmp/cef-cache/)",
+          "(Example: /tmp/cef-cache/) - "
+          "deprecated: set GST_CEF_CACHE_LOCATION in the environment instead",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
