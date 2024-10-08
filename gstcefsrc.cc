@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <glib.h>
 #include <sstream>
 #include <string>
 
@@ -90,24 +91,37 @@ static GThread *thread = nullptr;
   (gst_cef_log_severity_mode_get_type ())
 
 
+static const GEnumValue log_severity_values[] = {
+  {LOGSEVERITY_DEBUG, "debug / verbose cef log severity", "debug"},
+  {LOGSEVERITY_INFO, "info cef log severity", "info"},
+  {LOGSEVERITY_WARNING, "warning cef log severity", "warning"},
+  {LOGSEVERITY_ERROR, "error cef log severity", "error"},
+  {LOGSEVERITY_FATAL, "fatal cef log severity", "fatal"},
+  {LOGSEVERITY_DISABLE, "disable cef log severity", "disable"},
+  {0, NULL, NULL},
+};
+
 static GType
 gst_cef_log_severity_mode_get_type (void)
 {
   static GType type = 0;
-  static const GEnumValue values[] = {
-    {LOGSEVERITY_DEBUG, "debug / verbose cef log severity", "debug"},
-    {LOGSEVERITY_INFO, "info cef log severity", "info"},
-    {LOGSEVERITY_WARNING, "warning cef log severity", "warning"},
-    {LOGSEVERITY_ERROR, "error cef log severity", "error"},
-    {LOGSEVERITY_FATAL, "fatal cef log severity", "fatal"},
-    {LOGSEVERITY_DISABLE, "disable cef log severity", "disable"},
-    {0, NULL, NULL},
-  };
-
   if (!type) {
-    type = g_enum_register_static ("GstCefLogSeverityMode", values);
+    type = g_enum_register_static ("GstCefLogSeverityMode", log_severity_values);
   }
   return type;
+}
+
+static gint gst_cef_log_severity_from_str (const gchar *str)
+{
+  for (guint i = 0; i < sizeof(log_severity_values) / sizeof(GEnumValue); i++) {
+    const gchar *nick = log_severity_values[i].value_nick;
+    if (!nick) break;
+    if (g_str_equal(str, nick)) {
+      return log_severity_values[i].value;
+    }
+  }
+
+  return -1;
 }
 
 enum
@@ -600,15 +614,17 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
     command_line->AppendSwitch("enable-begin-frame-scheduling"); /* https://bitbucket.org/chromiumembedded/cef/issues/1368 */
 
+    bool gpu = src->gpu || (!!g_getenv ("GST_CEF_GPU_ENABLED"));
+
 #ifdef __APPLE__
     command_line->AppendSwitch("off-screen-rendering-enabled");
-    if (src->gpu) {
+    if (gpu) {
       GST_WARNING_OBJECT(src, "GPU rendering is known not to work on macOS. Disabling it now. See https://github.com/chromiumembedded/cef/issues/3322 and https://magpcss.org/ceforum/viewtopic.php?f=6&t=19397");
-      src->gpu = FALSE;
+      gpu = FALSE;
     }
 #endif
 
-    if (!src->gpu) {
+    if (!gpu) {
       // Optimize for no gpu usage
       command_line->AppendSwitch("disable-gpu");
       command_line->AppendSwitch("disable-gpu-compositing");
@@ -618,8 +634,13 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
       command_line->AppendSwitchWithValue("remote-debugging-port", g_strdup_printf ("%i", src->chromium_debug_port));
     }
 
-    if (src->chrome_extra_flags) {
-      gchar **flags_list = g_strsplit ((const gchar *) src->chrome_extra_flags, ",", -1);
+    const gchar *extra_flags = src->chrome_extra_flags;
+    if (!extra_flags) {
+      extra_flags = g_getenv ("GST_CEF_CHROME_EXTRA_FLAGS");
+    }
+
+    if (extra_flags) {
+      gchar **flags_list = g_strsplit (extra_flags, ",", -1);
       guint i;
 
       for (i = 0; i < g_strv_length (flags_list); i++) {
@@ -698,7 +719,7 @@ gst_cef_shutdown(void *)
  * concurrent cefsrc instances.
  */
 static gpointer
-run_cef (GstCefSrc *src)
+init_cef (GstCefSrc *src)
 {
 #ifdef G_OS_WIN32
   HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -712,9 +733,31 @@ run_cef (GstCefSrc *src)
   CefWindowInfo window_info;
   CefBrowserSettings browserSettings;
 
-  settings.no_sandbox = !src->sandbox;
+  // pull in parameters from gst properties (deprecated) or environment
+  cef_log_severity_t log_severity = src->log_severity;
+  const gchar* log_severity_env = g_getenv ("GST_CEF_LOG_SEVERITY");
+  if (log_severity_env) {
+    gint severity = gst_cef_log_severity_from_str(log_severity_env);
+    if (severity >= 0) {
+      log_severity = (cef_log_severity_t) severity;
+    }
+  }
+
+  const gchar *js_flags = src->js_flags;
+  if (!js_flags) {
+    js_flags = g_getenv ("GST_CEF_JS_FLAGS");
+  }
+
+  const gchar *cef_cache_location = src->cef_cache_location;
+  if (!cef_cache_location) {
+    cef_cache_location = g_getenv ("GST_CEF_CACHE_LOCATION");
+  }
+
+  bool sandbox = src->gpu || (!!g_getenv ("GST_CEF_SANDBOX"));
+
+  settings.no_sandbox = !sandbox;
   settings.windowless_rendering_enabled = true;
-  settings.log_severity = src->log_severity;
+  settings.log_severity = log_severity;
   settings.multi_threaded_message_loop = false;
 #ifdef __APPLE__
   settings.external_message_pump = true;
@@ -777,12 +820,12 @@ run_cef (GstCefSrc *src)
   gchar *locales_dir_path = g_build_filename(base_path, "locales", nullptr);
   CefString(&settings.locales_dir_path).FromASCII(locales_dir_path);
 
-  if (src->js_flags != NULL) {
-    CefString(&settings.javascript_flags).FromASCII(src->js_flags);
+  if (js_flags != NULL) {
+    CefString(&settings.javascript_flags).FromASCII(js_flags);
   }
 
-  if (src->cef_cache_location != NULL) {
-    CefString(&settings.cache_path).FromASCII(src->cef_cache_location);
+  if (cef_cache_location != NULL) {
+    CefString(&settings.cache_path).FromASCII(cef_cache_location);
   }
 
   g_free(base_path);
@@ -847,7 +890,7 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
       }
 #else
         /* in a separate UI thread */
-      thread = g_thread_new("cef-ui-thread", (GThreadFunc) run_cef, (GstCefSrc*)src);
+      thread = g_thread_new("cef-ui-thread", (GThreadFunc) init_cef, (GstCefSrc*)src);
       while (cef_status == CEF_STATUS_INITIALIZING)
         g_cond_wait (&init_cond, &init_lock);
 #endif
@@ -1120,22 +1163,42 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       break;
     }
     case PROP_CHROME_EXTRA_FLAGS: {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc chrome-extra-flags property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_CHROME_EXTRA_FLAGS instead"
+      );
       g_free (src->chrome_extra_flags);
       src->chrome_extra_flags = g_value_dup_string (value);
       break;
     }
     case PROP_GPU:
     {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc gpu property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_GPU_ENABLED instead"
+      );
       src->gpu = g_value_get_boolean (value);
       break;
     }
     case PROP_CHROMIUM_DEBUG_PORT:
     {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc chromium-debug-port property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_CHROME_EXTRA_FLAGS instead"
+      );
       src->chromium_debug_port = g_value_get_int (value);
       break;
     }
     case PROP_SANDBOX:
     {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc sandbox property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_SANDBOX instead"
+      );
       src->sandbox = g_value_get_boolean (value);
       break;
     }
@@ -1144,16 +1207,34 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->listen_for_js_signals = g_value_get_boolean (value);
       break;
     }
-    case PROP_JS_FLAGS: {
+    case PROP_JS_FLAGS:
+    {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc js-flags property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_JS_FLAGS instead"
+      );
       g_free (src->js_flags);
       src->js_flags = g_value_dup_string (value);
       break;
     }
-    case PROP_LOG_SEVERITY: {
+    case PROP_LOG_SEVERITY:
+    {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc log-severity property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_LOG_SEVERITY instead"
+      );
       src->log_severity = (cef_log_severity_t) g_value_get_enum (value);
       break;
     }
-    case PROP_CEF_CACHE_LOCATION: {
+    case PROP_CEF_CACHE_LOCATION:
+    {
+      GST_WARNING_OBJECT(
+        src,
+        "cefsrc cef-cache-location property is deprecated and is global across all cefsrc instances - "
+        "set GST_CEF_CACHE_LOCATION instead"
+      );
       g_free (src->cef_cache_location);
       src->cef_cache_location = g_value_dup_string (value);
       break;
@@ -1267,24 +1348,27 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
 
   g_object_class_install_property (gobject_class, PROP_GPU,
     g_param_spec_boolean ("gpu", "gpu",
-          "Enable GPU usage in chromium (Improves performance if you have GPU)",
+          "Enable GPU usage in chromium (Improves performance if you have GPU) - "
+          "deprecated: set GST_CEF_GPU_ENABLED in the environment instead",
           DEFAULT_GPU, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_CHROMIUM_DEBUG_PORT,
     g_param_spec_int ("chromium-debug-port", "chromium-debug-port",
-          "Set chromium debug port (-1 = disabled) "
-          "deprecated: use chrome-extra-flags instead", -1, G_MAXUINT16,
+          "Set chromium debug port (-1 = disabled) - "
+          "deprecated: set GST_CEF_CHROME_EXTRA_FLAGS in the environment instead", -1, G_MAXUINT16,
           DEFAULT_CHROMIUM_DEBUG_PORT, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_CHROME_EXTRA_FLAGS,
     g_param_spec_string ("chrome-extra-flags", "chrome-extra-flags",
           "Comma delimiter flags to be passed into chrome "
-          "(Example: show-fps-counter,remote-debugging-port=9222)",
+          "(Example: show-fps-counter,remote-debugging-port=9222) - "
+          "deprecated: set GST_CEF_CHROME_EXTRA_FLAGS in the environment instead",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_SANDBOX,
     g_param_spec_boolean ("sandbox", "sandbox",
-          "Toggle chromium sandboxing capabilities",
+          "Toggle chromium sandboxing capabilities - "
+          "deprecated: set GST_CEF_SANDBOX in the environment instead",
           DEFAULT_SANDBOX, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
   g_object_class_install_property (gobject_class, PROP_LISTEN_FOR_JS_SIGNAL,
     g_param_spec_boolean ("listen-for-js-signals", "listen-for-js-signals",
@@ -1297,19 +1381,22 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
   g_object_class_install_property (gobject_class, PROP_JS_FLAGS,
     g_param_spec_string ("js-flags", "js-flags",
           "Space delimited JavaScript flags to be passed to Chromium "
-          "(Example: --noexpose_wasm --expose-gc)",
+          "(Example: --noexpose_wasm --expose-gc) - "
+          "deprecated: set GST_CEF_JS_FLAGS in the environment instead",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_LOG_SEVERITY,
       g_param_spec_enum ("log-severity", "log-severity",
-          "CEF log severity level",
+          "CEF log severity level - "
+          "deprecated: set GST_CEF_LOG_SEVERITY in the environment instead",
           GST_TYPE_CEF_LOG_SEVERITY_MODE, DEFAULT_LOG_SEVERITY,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_CEF_CACHE_LOCATION,
     g_param_spec_string ("cef-cache-location", "cef-cache-location",
           "Cache location for CEF. Defaults to in memory cache. "
-          "(Example: /tmp/cef-cache/)",
+          "(Example: /tmp/cef-cache/) - "
+          "deprecated: set GST_CEF_CACHE_LOCATION in the environment instead",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
