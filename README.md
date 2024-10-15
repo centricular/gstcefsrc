@@ -116,6 +116,26 @@ GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
 gst-launch-1.0 playbin uri=web+https://www.soundcloud.com/platform/sama
 ```
 
+### Note on Global CEF Parameters
+
+This note is only relevant if you want to run multiple cefsrc instances in the same process.
+
+Prior releases of this plugin exposed some CEF properties that are in fact global to a single process.
+We have now deprecated use of these as cefsrc element properties and instead exposed them as environment
+variables. These properties are listed here for reference along with the env var that replaces them:
+
+- `cef-cache-location` - set GST_CEF_CACHE_LOCATION instead
+- `chrome-extra-flags` - set GST_CEF_CHROME_EXTRA_FLAGS
+- `chromium-debug-port` - set GST_CEF_CHROME_EXTRA_FLAGS
+- `gpu` - set GST_CEF_GPU_ENABLED
+- `log-severity` - set GST_CEF_LOG_SEVERITY
+- `sandbox` - set GST_CEF_SANDBOX
+
+Note that if you do require pipelines / applications that run multiple `cefsrc` instances with differing
+values for the above properties, we recommend running these source sections in a separate process and
+bring the resulting frames into your main process using something like the
+[`ipc`](https://gstreamer.freedesktop.org/documentation/ipcpipeline/index.html?gi-language=c) plugins.
+
 ## Docker GPU Acceleration
 
 This is simply a hint/note for those who want to use this plugin in a docker container with GPU acceleration. Your particular setup may vary. The following was tested on Ubuntu 22.04 with a Nvidia GPU. This assumes you have installed the Nvidia drivers, docker, and the Nvidia Container Toolkit. You may also need to configure your xorg.conf within the container to use the Nvidia GPU.
@@ -138,11 +158,11 @@ Xorg -noreset +extension GLX +extension RANDR \+extension RENDER -logfile ./xser
 Test that the GPU is accessible by running:
 
 ``` shell
-gst-launch-1.0 -e cefsrc url="chrome://gpu" gpu=true \
-chrome-extra-flags="use-gl=egl, enable-gpu-rasterization,ignore-gpu-blocklist" \
-! video/x-raw, width=1920, height=8080, framerate=1/1 \
-! cefdemux name=demux ! queue ! videoconvert \
-! pngenc ! multifilesink location="frame%d.png"
+GST_CEF_CHROME_EXTRA_FLAGS="use-gl=egl, enable-gpu-rasterization,ignore-gpu-blocklist" \
+GST_CEF_GPU_ENABLED="set" gst-launch-1.0 -e cefsrc url="chrome://gpu" \
+  ! video/x-raw, width=1920, height=8080, framerate=1/1 \
+  ! cefdemux name=demux ! queue ! videoconvert \
+  ! pngenc ! multifilesink location="frame%d.png"
 ```
 
 It is also helpful to run nvidia-smi or nvtop to verify the GPU is being used. Note it is possible to use the GPU within a kube pod as well. This has been tested and runs in a production environment on GKE using Container Optimized OS.
