@@ -496,7 +496,11 @@ class BrowserClient :
       return false;
     }
 
-    virtual void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status) override
+  virtual void OnRenderProcessTerminated(
+    CefRefPtr<CefBrowser> browser,
+    TerminationStatus status,
+    int error_code,
+    const CefString& error_string) override
     {
       CEF_REQUIRE_UI_THREAD();
       GST_WARNING_OBJECT (src, "Render subprocess terminated, reloading URL!");
