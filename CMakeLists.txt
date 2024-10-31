@@ -84,9 +84,13 @@ set(GSTCEF_SRCS
 )
 
 set(GSTCEFSUBPROCESS_SRCS
-  gstcefloader.cc
   gstcefsubprocess.cc
 )
+
+if (APPLE)
+list(APPEND GSTCEF_SRCS gstcefloader.cc)
+list(APPEND GSTCEFSUBPROCESS_SRCS gstcefloader.cc)
+endif()
 
 pkg_check_modules(GST REQUIRED gstreamer-1.0
                   gstreamer-video-1.0
