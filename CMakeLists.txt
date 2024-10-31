@@ -150,9 +150,14 @@ if (NOT APPLE)
   COPY_FILES("gstcef" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
   COPY_FILES("gstcef" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
   install(
-    DIRECTORY "${CEF_RESOURCE_DIR}" "${CEF_BINARY_DIR}"
+    DIRECTORY "${CEF_RESOURCE_DIR}"
     DESTINATION .
     USE_SOURCE_PERMISSIONS
+  )
+  install(
+      DIRECTORY ${CEF_TARGET_OUT_DIR}/
+      DESTINATION .
+      USE_SOURCE_PERMISSIONS
   )
 else()
   # Unlike in other OSes, CEF on macOS relies on several independent "helper"
