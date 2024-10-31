@@ -845,10 +845,10 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
       /* in the main thread as per Cocoa */
       if (pthread_main_np()) {
         g_mutex_unlock (&init_lock);
-        run_cef ((GstCefSrc*) src);
+        init_cef ((GstCefSrc*) src);
         g_mutex_lock (&init_lock);
       } else {
-        dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)src, (dispatch_function_t)&run_cef);
+        dispatch_async_f(dispatch_get_main_queue(), (GstCefSrc*)src, (dispatch_function_t)&init_cef);
         while (cef_status == CEF_STATUS_INITIALIZING)
           g_cond_wait (&init_cond, &init_lock);
       }
