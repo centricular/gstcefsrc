@@ -21,12 +21,11 @@
 #include <include/cef_app.h>
 #include <glib.h>
 
-#ifdef GST_CEF_USE_SANDBOX
+#if defined(__APPLE__)
 #include "gstcefloader.h"
-#endif
-
-#if !defined(__APPLE__) && defined(GST_CEF_USE_SANDBOX)
+#if defined(GST_CEF_USE_SANDBOX)
 #include "include/cef_sandbox_mac.h"
+#endif
 #endif
 
 
@@ -123,7 +122,7 @@ class RendererApp : public CefApp, public CefRenderProcessHandler {
 
 int main(int argc, char * argv[])
 {
-#if !defined(__APPLE__) && defined(GST_CEF_USE_SANDBOX)
+#if defined(__APPLE__) && defined(GST_CEF_USE_SANDBOX)
   // Initialize the macOS sandbox for this helper process.
   CefScopedSandboxContext sandbox_context;
   if (!sandbox_context.Initialize(argc, argv)) {
@@ -141,7 +140,7 @@ int main(int argc, char * argv[])
   CefMainArgs args(argc, argv);
 #endif
 
-#ifdef GST_CEF_USE_SANDBOX
+#if defined(__APPLE__) && defined(GST_CEF_USE_SANDBOX)
   // Try loading like an app bundle (1) or as
   // a sibling (2, at development time).
   if (!gst_initialize_cef(TRUE) && !gst_initialize_cef(FALSE)) {
