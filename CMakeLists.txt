@@ -80,7 +80,6 @@ set(GSTCEF_SRCS
   gstcefdemux.cc
   gstcefbin.cc
   gstcefaudiometa.cc
-  gstcefloader.cc
 )
 
 set(GSTCEFSUBPROCESS_SRCS

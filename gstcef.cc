@@ -20,7 +20,7 @@
 #include "gstcefsrc.h"
 #include "gstcefdemux.h"
 #include "gstcefbin.h"
-#ifdef GST_CEF_USE_SANDBOX
+#if defined(__APPLE__) && defined(GST_CEF_USE_SANDBOX)
 #include "gstcefloader.h"
 #endif
 
@@ -32,7 +32,7 @@ plugin_init(GstPlugin *plugin)
       !gst_element_register (plugin, "cefbin", GST_RANK_NONE, GST_TYPE_CEF_BIN))
     return FALSE;
 
-#ifdef GST_CEF_USE_SANDBOX
+#if defined(__APPLE__) && defined(GST_CEF_USE_SANDBOX)
   return gst_initialize_cef(FALSE);
 #else
   return TRUE;
