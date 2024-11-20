@@ -15,7 +15,6 @@
 #include <include/base/cef_bind.h>
 #include <include/base/cef_callback_helpers.h>
 #include <include/wrapper/cef_closure_task.h>
-#include <include/wrapper/cef_message_router.h>
 
 #include "gstcefsrc.h"
 #include "gstcefaudiometa.h"
@@ -907,6 +906,7 @@ gst_cef_src_start(GstBaseSrc *base_src)
 
   GST_OBJECT_LOCK (src);
   src->n_frames = 0;
+  src->client = browserClient;
   GST_OBJECT_UNLOCK (src);
 
   GST_ELEMENT_PROGRESS(src, CONTINUE, "open", ("Creating CEF browser ..."));
@@ -967,6 +967,8 @@ gst_cef_src_stop (GstBaseSrc *base_src)
 {
   GstCefSrc *src = GST_CEF_SRC (base_src);
 
+  GST_OBJECT_LOCK (src);
+
   GST_INFO_OBJECT (src, "Stopping");
 
   if (src->browser) {
@@ -985,6 +987,8 @@ gst_cef_src_stop (GstBaseSrc *base_src)
   }
 
   gst_buffer_replace (&src->current_buffer, NULL);
+
+  GST_OBJECT_UNLOCK (src);
 
   return TRUE;
 }
@@ -1235,6 +1239,9 @@ gst_cef_src_finalize (GObject *object)
 
   g_free (src->js_flags);
   g_free (src->cef_cache_location);
+
+  // free client
+  src->client->Release();
 
   g_cond_clear(&src->state_cond);
   g_mutex_clear(&src->state_lock);
