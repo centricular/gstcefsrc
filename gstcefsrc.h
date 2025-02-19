@@ -2,6 +2,7 @@
 #define __GST_CEF_SRC_H__
 
 #include "include/cef_browser_process_handler.h"
+#include "include/internal/cef_ptr.h"
 #include <gst/gst.h>
 #include <gst/base/gstpushsrc.h>
 #include <gst/video/video.h>
@@ -11,7 +12,7 @@
 #include <include/cef_life_span_handler.h>
 #include <include/cef_load_handler.h>
 #include <include/wrapper/cef_helpers.h>
-
+#include <include/wrapper/cef_message_router.h>
 
 G_BEGIN_DECLS
 
@@ -61,7 +62,7 @@ struct _GstCefSrc {
   gboolean listen_for_js_signals;
   gint chromium_debug_port;
   CefRefPtr<CefBrowser> browser;
-  CefRefPtr<CefApp> app;
+  CefRefPtr<CefClient> client;
 
   GCond state_cond;
   GMutex state_lock;
