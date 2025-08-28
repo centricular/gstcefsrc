@@ -872,6 +872,10 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
       }
     }
     g_mutex_unlock(&init_lock);
+
+    GstCefSrc *cefsrc = GST_CEF_SRC (src);
+    gst_buffer_replace (&cefsrc->current_buffer, NULL);
+
     break;
   }
   default:
