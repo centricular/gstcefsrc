@@ -27,7 +27,7 @@ if(POLICY CMP0074)
 endif()
 
 if (NOT DEFINED CEF_VERSION)
-  set(CEF_VERSION "130.1.15+g34b05bb+chromium-130.0.6723.92")
+  set(CEF_VERSION "122.1.13+gde5b724+chromium-122.0.6261.130")
 endif()
 
 STRING(REGEX REPLACE "\\+" "%2B" CEF_ESCAPED_VERSION ${CEF_VERSION})
@@ -210,7 +210,7 @@ else()
   # Copy framework for testing
   COPY_FILES("gstcef" "Chromium\ Embedded\ Framework.framework" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
   install(
-    DIRECTORY "${CEF_BINARY_DIR}/Chromium Embedded Framework.framework"
+    DIRECTORY "${CEF_BINARY_DIR}/Chromium Embedded Framework.framework" 
     DESTINATION .
     USE_SOURCE_PERMISSIONS
   )
