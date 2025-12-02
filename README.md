@@ -136,6 +136,17 @@ values for the above properties, we recommend running these source sections in a
 bring the resulting frames into your main process using something like the
 [`ipc`](https://gstreamer.freedesktop.org/documentation/ipcpipeline/index.html?gi-language=c) plugins.
 
+# Chrome Logs
+
+Note that in more recent versions of CEF, you have to specify a chrome flag (`enable-logging=stderr`) for
+CEF logs to be displayed in the console, so for example you might set:
+
+``` shell
+GST_CEF_CHROME_EXTRA_FLAGS="no-sandbox,disable-component-update,enable-logging=stderr"
+```
+
+See [here](https://www.chromium.org/for-testers/enable-logging/) for more detail.
+
 ## Docker GPU Acceleration
 
 This is simply a hint/note for those who want to use this plugin in a docker container with GPU acceleration. Your particular setup may vary. The following was tested on Ubuntu 22.04 with a Nvidia GPU. This assumes you have installed the Nvidia drivers, docker, and the Nvidia Container Toolkit. You may also need to configure your xorg.conf within the container to use the Nvidia GPU.
