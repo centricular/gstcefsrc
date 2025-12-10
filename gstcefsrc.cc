@@ -1,4 +1,9 @@
+#include "gst/gstclock.h"
+#include "gst/gstelement.h"
+#include "gst/gstinfo.h"
+#include "gst/gstobject.h"
 #include <cstdio>
+#include <glib-object.h>
 #include <glib.h>
 #include <sstream>
 #include <string>
@@ -295,6 +300,8 @@ class AudioHandler : public CefAudioHandler
         nullptr);
     GstEvent *event = gst_event_new_custom (GST_EVENT_CUSTOM_DOWNSTREAM, s);
 
+    GST_LOG_OBJECT (src, "Audio stream starting");
+
     mRate = params.sample_rate;
     mChannels = channels;
 
@@ -312,8 +319,6 @@ class AudioHandler : public CefAudioHandler
     GstMapInfo info;
     gint i, j;
 
-    GST_LOG_OBJECT (src, "Handling audio stream packet with %d frames", frames);
-
     buf = gst_buffer_new_allocate (NULL, mChannels * frames * 4, NULL);
 
     gst_buffer_map (buf, &info, GST_MAP_WRITE);
@@ -326,9 +331,65 @@ class AudioHandler : public CefAudioHandler
     }
     gst_buffer_unmap (buf, &info);
 
+    GstClockTimeDiff dt = gst_util_uint64_scale (frames, GST_SECOND, mRate);
+
+    // map cef pts to gstreamer pts
+    GstClockTime cef_pts = pts * GST_MSECOND;
+    GstClockTime gst_pts = GST_CLOCK_TIME_NONE;
+
     GST_OBJECT_LOCK (src);
 
-    GST_BUFFER_DURATION (buf) = gst_util_uint64_scale (frames, GST_SECOND, mRate);
+    // calculate offset between cef clock and gst clock
+    if (cefGstOffset == 0) {
+      // add latency
+      // NB: audio latency is required because of the way the audio data is muxed into the video
+      //     buffers
+      // TODO: is there a better way to determine the required audio latency here?
+      GstClockTimeDiff audio_latency = (dt * 4);
+
+      GstClockTime vpts = gst_util_uint64_scale (src->n_frames + 1, src->vinfo.fps_d * GST_SECOND, src->vinfo.fps_n);
+      cefGstOffset = GST_CLOCK_DIFF (cef_pts, vpts) + audio_latency;
+
+      GST_LOG_OBJECT(src,
+                     "calculated  pts offset from cef_pts: %"
+                     GST_TIME_FORMAT " to vpts %" GST_TIME_FORMAT
+                     " = %li ns",
+                     GST_TIME_ARGS (cef_pts),
+                     GST_TIME_ARGS (vpts),
+                     cefGstOffset);
+    }
+
+    cef_pts += cefGstOffset;
+
+    GST_LOG_OBJECT (src,
+                    "Handling audio stream packet with %d frames @pts %lu (cef_pts: %" GST_TIME_FORMAT ") %i",
+                    frames,
+                    pts,
+                    GST_TIME_ARGS (cef_pts),
+                    mRate);
+
+    if (nextBufTimeGuess == GST_CLOCK_TIME_NONE) {
+      // use pts from cef * 1_000_000
+      gst_pts = cef_pts;
+    } else {
+      GstClockTimeDiff abs_error = cef_pts > nextBufTimeGuess
+        ? cef_pts - nextBufTimeGuess
+        : nextBufTimeGuess - cef_pts;
+      // allow for a drift of 1ms
+      if (abs_error < GST_MSECOND) {
+        gst_pts = nextBufTimeGuess;
+      } else {
+        // use cef_pts
+        gst_pts = cef_pts;
+      }
+    }
+
+    prevBufTime = gst_pts;
+    nextBufTimeGuess = gst_pts + dt;
+
+    GST_BUFFER_DURATION (buf) = dt;
+    GST_BUFFER_PTS (buf) = gst_pts;
+    GST_BUFFER_DTS (buf) = gst_pts;
 
     if (!src->audio_buffers) {
       src->audio_buffers = gst_buffer_list_new();
@@ -342,6 +403,7 @@ class AudioHandler : public CefAudioHandler
 
   void OnAudioStreamStopped(CefRefPtr<CefBrowser> browser) override
   {
+    GST_LOG_OBJECT (src, "Audio stream stopping");
   }
 
   void OnAudioStreamError(CefRefPtr<CefBrowser> browser,
@@ -354,6 +416,11 @@ class AudioHandler : public CefAudioHandler
     GstCefSrc *src;
     gint mRate;
     gint mChannels;
+
+    GstClockTime nextBufTimeGuess = GST_CLOCK_TIME_NONE;
+    GstClockTime prevBufTime = GST_CLOCK_TIME_NONE;
+    GstClockTimeDiff cefGstOffset = 0;
+
     IMPLEMENT_REFCOUNTING(AudioHandler);
 };
 
@@ -672,8 +739,14 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_buffers = NULL;
   }
 
+
   GST_BUFFER_PTS (*buf) = gst_util_uint64_scale (src->n_frames, src->vinfo.fps_d * GST_SECOND, src->vinfo.fps_n);
   GST_BUFFER_DURATION (*buf) = gst_util_uint64_scale (GST_SECOND, src->vinfo.fps_d, src->vinfo.fps_n);
+
+  GST_DEBUG_OBJECT(src,
+                   "creating v_buffer pts: %" GST_TIME_FORMAT,
+                   GST_TIME_ARGS (GST_BUFFER_PTS (*buf)));
+
   src->n_frames++;
   GST_OBJECT_UNLOCK (src);
 

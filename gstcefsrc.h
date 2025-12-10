@@ -1,6 +1,7 @@
 #ifndef __GST_CEF_SRC_H__
 #define __GST_CEF_SRC_H__
 
+#include "gst/gstclock.h"
 #include "include/cef_browser_process_handler.h"
 #include <gst/gst.h>
 #include <gst/base/gstpushsrc.h>
