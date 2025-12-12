@@ -33,7 +33,7 @@ struct _GstCefDemux {
   GList *cef_audio_stream_start_events;
   GstEvent *vcaps_event;
   GstFlowCombiner *flow_combiner;
-  GstClockTime last_audio_time;
+  GstClockTime last_audio_pts;
   GstAudioInfo audio_info;
 };
 
