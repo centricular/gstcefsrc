@@ -951,14 +951,23 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
 
     break;
   }
+  case GST_STATE_CHANGE_READY_TO_PAUSED:
+  case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+  {
+    // TODO: this need to be NO_PREROLL according to docs
+    // https://gstreamer.freedesktop.org/documentation/additional/design/live-source.html?gi-language=c
+    // result = GST_STATE_CHANGE_NO_PREROLL;
+    break;
+  }
   default:
     break;
   }
 
-  if (result == GST_STATE_CHANGE_FAILURE) return result;
-  result = GST_ELEMENT_CLASS(parent_class)->change_state(src, transition);
+  if (result == GST_STATE_CHANGE_FAILURE || result == GST_STATE_CHANGE_NO_PREROLL) {
+    return result;
+  }
 
-  return result;
+  return GST_ELEMENT_CLASS(parent_class)->change_state(src, transition);
 }
 
 static gboolean
