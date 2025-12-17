@@ -32,6 +32,8 @@
       }
     </style>
     <script language="JavaScript">
+      const params = new URLSearchParams(window.location.search);
+
       let frameNum = 0; // s
       let fps = 0;
       let t = undefined;
@@ -72,21 +74,25 @@
         requestAnimationFrame(animate);
       }
 
-      const audioDelay = 1000;
+      const audioDelayStr = params.get("audioDelay") ?? "1000";
+      const audioDelay = parseInt(audioDelayStr);
+      console.log("audioDelay:", audioDelay);
+      if (audioDelay >= 0) {
 
-      document.addEventListener("DOMContentLoaded", () => {
-        setTimeout(() => {
-          const audio = new Audio("sounds/test.mp3");
-          // audio.loop = true;
-          audio.play();
-          audio.onended = () => {
-            setTimeout(() => {
-              audio.currentTime = 0;
-              audio.play();
-            }, audioDelay);
-          }
-        }, audioDelay);
-      });
+        document.addEventListener("DOMContentLoaded", () => {
+          setTimeout(() => {
+            const audio = new Audio("sounds/test.mp3");
+            // audio.loop = true;
+            audio.play();
+            audio.onended = () => {
+              setTimeout(() => {
+                audio.currentTime = 0;
+                audio.play();
+              }, audioDelay);
+            }
+          }, audioDelay);
+        });
+      }
 
       requestAnimationFrame(animate);
     </script>

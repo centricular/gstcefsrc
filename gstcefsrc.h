@@ -64,6 +64,12 @@ struct _GstCefSrc {
   CefRefPtr<CefBrowser> browser;
   CefRefPtr<CefApp> app;
 
+  gboolean is_live;
+  GCond on_paint_cond;
+  GMutex on_paint_lock;
+  gboolean painted;
+  gboolean flushing;
+
   GCond state_cond;
   GMutex state_lock;
   CefSrcState state;
