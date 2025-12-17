@@ -1,6 +1,9 @@
 #include <gst/audio/audio.h>
 
 #include "gstcefdemux.h"
+#include "gst/gstclock.h"
+#include "gst/gstinfo.h"
+#include "gst/gststructure.h"
 #include "gstcefaudiometa.h"
 
 #define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
@@ -145,11 +148,14 @@ gst_element_get_current_running_time (GstElement * element)
 static gboolean
 gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *push_data)
 {
-  push_data->demux->last_audio_time = gst_element_get_current_running_time (GST_ELEMENT_CAST (push_data->demux));
-  GST_BUFFER_DTS (*buffer) = push_data->demux->last_audio_time;
-  GST_BUFFER_PTS (*buffer) = push_data->demux->last_audio_time;
+  GstClockTime pts = GST_BUFFER_PTS(*buffer);
+  GstClockTimeDiff delta_pts = pts - push_data->demux->last_audio_pts;
+  GST_LOG_OBJECT (push_data->demux,
+                  "pushing audio buffer pts %" GST_TIME_FORMAT " dt: %" GST_TIME_FORMAT,
+                  GST_TIME_ARGS (pts),
+                  GST_TIME_ARGS (delta_pts));
 
-  gst_buffer_add_audio_meta (*buffer, &push_data->demux->audio_info, 
+  gst_buffer_add_audio_meta (*buffer, &push_data->demux->audio_info,
                              gst_buffer_get_size (*buffer) / GST_AUDIO_INFO_BPF (&push_data->demux->audio_info), 
                              NULL);
 
@@ -161,6 +167,8 @@ gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *p
 
   push_data->combined = gst_flow_combiner_update_pad_flow (push_data->flow_combiner, push_data->demux->asrcpad,
       gst_pad_push (push_data->demux->asrcpad, *buffer));
+
+  push_data->demux->last_audio_pts = pts;
 
   *buffer = NULL;
   return TRUE;
@@ -221,24 +229,30 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
     }
   }
 
+  GST_DEBUG_OBJECT(demux,
+                   "pushing video buffer pts: %" GST_TIME_FORMAT,
+                   GST_TIME_ARGS (GST_BUFFER_PTS (buffer)));
+
   ret = gst_flow_combiner_update_pad_flow (demux->flow_combiner, demux->vsrcpad,
       gst_pad_push (demux->vsrcpad, buffer));
 
-  if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time) || demux->last_audio_time < GST_BUFFER_PTS (buffer)) {
+  if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_pts) || demux->last_audio_pts < GST_BUFFER_PTS (buffer)) {
     GstClockTime duration, timestamp;
 
-    if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time)) {
+    if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_pts)) {
       timestamp = GST_BUFFER_PTS (buffer);
       duration = GST_BUFFER_DURATION (buffer);
     } else {
-      timestamp = demux->last_audio_time;
-      duration = GST_BUFFER_PTS (buffer) - demux->last_audio_time;
+      timestamp = demux->last_audio_pts;
+      duration = GST_BUFFER_PTS (buffer) - demux->last_audio_pts;
     }
 
+    GST_LOG_OBJECT(demux,
+                   "pushing gap event t: %" GST_TIME_FORMAT " d: %" GST_TIME_FORMAT,
+                   GST_TIME_ARGS(timestamp),
+                   GST_TIME_ARGS(duration));
     gst_pad_push_event (demux->asrcpad, gst_event_new_gap (timestamp, duration));
-
-    demux->last_audio_time = GST_BUFFER_PTS (buffer);
-  }
+   }
 
   if (ret != GST_FLOW_OK)
     goto done;
@@ -351,7 +365,8 @@ gst_cef_demux_init (GstCefDemux * demux)
   demux->need_caps = TRUE;
   demux->need_segment = TRUE;
   demux->need_discont = TRUE;
-  demux->last_audio_time = GST_CLOCK_TIME_NONE;
+  demux->last_audio_pts = GST_CLOCK_TIME_NONE;
+  demux->cef_audio_stream_start_events = NULL;
 }
 
 static void

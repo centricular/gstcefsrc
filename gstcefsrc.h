@@ -1,6 +1,7 @@
 #ifndef __GST_CEF_SRC_H__
 #define __GST_CEF_SRC_H__
 
+#include "gst/gstclock.h"
 #include "include/cef_browser_process_handler.h"
 #include <gst/gst.h>
 #include <gst/base/gstpushsrc.h>
@@ -62,6 +63,12 @@ struct _GstCefSrc {
   gint chromium_debug_port;
   CefRefPtr<CefBrowser> browser;
   CefRefPtr<CefApp> app;
+
+  gboolean is_live;
+  GCond on_paint_cond;
+  GMutex on_paint_lock;
+  gboolean painted;
+  gboolean flushing;
 
   GCond state_cond;
   GMutex state_lock;

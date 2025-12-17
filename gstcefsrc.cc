@@ -1,4 +1,10 @@
+#include "gst/gstclock.h"
+#include "gst/gstelement.h"
+#include "gst/gstinfo.h"
+#include "gst/gstobject.h"
+#include "gst/gstpad.h"
 #include <cstdio>
+#include <glib-object.h>
 #include <glib.h>
 #include <sstream>
 #include <string>
@@ -39,6 +45,7 @@ GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 
 GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 
+#define DEFAULT_IS_LIVE TRUE
 #define DEFAULT_WIDTH 1920
 #define DEFAULT_HEIGHT 1080
 #define DEFAULT_FPS_N 30
@@ -121,6 +128,7 @@ enum
 {
   PROP_0,
   PROP_URL,
+  PROP_IS_LIVE,
   PROP_GPU,
   PROP_CHROMIUM_DEBUG_PORT,
   PROP_CHROME_EXTRA_FLAGS,
@@ -262,6 +270,14 @@ class RenderHandler : public CefRenderHandler
       gst_buffer_unref (new_buffer);
       GST_OBJECT_UNLOCK (src);
 
+      if (!src->is_live) {
+        g_mutex_lock(&src->on_paint_lock);
+        src->painted = TRUE;
+
+        g_cond_signal(&src->on_paint_cond);
+        g_mutex_unlock(&src->on_paint_lock);
+      }
+
       GST_LOG_OBJECT (src, "done painting");
     }
 
@@ -295,6 +311,8 @@ class AudioHandler : public CefAudioHandler
         nullptr);
     GstEvent *event = gst_event_new_custom (GST_EVENT_CUSTOM_DOWNSTREAM, s);
 
+    GST_LOG_OBJECT (src, "Audio stream starting");
+
     mRate = params.sample_rate;
     mChannels = channels;
 
@@ -312,8 +330,6 @@ class AudioHandler : public CefAudioHandler
     GstMapInfo info;
     gint i, j;
 
-    GST_LOG_OBJECT (src, "Handling audio stream packet with %d frames", frames);
-
     buf = gst_buffer_new_allocate (NULL, mChannels * frames * 4, NULL);
 
     gst_buffer_map (buf, &info, GST_MAP_WRITE);
@@ -326,9 +342,65 @@ class AudioHandler : public CefAudioHandler
     }
     gst_buffer_unmap (buf, &info);
 
+    GstClockTimeDiff dt = gst_util_uint64_scale (frames, GST_SECOND, mRate);
+
+    // map cef pts to gstreamer pts
+    GstClockTime cef_pts = pts * GST_MSECOND;
+    GstClockTime gst_pts = GST_CLOCK_TIME_NONE;
+
     GST_OBJECT_LOCK (src);
 
-    GST_BUFFER_DURATION (buf) = gst_util_uint64_scale (frames, GST_SECOND, mRate);
+    // calculate offset between cef clock and gst clock
+    if (cefGstOffset == 0) {
+      // add latency
+      // NB: audio latency is required because of the way the audio data is muxed into the video
+      //     buffers
+      // TODO: is there a better way to determine the required audio latency here?
+      GstClockTimeDiff audio_latency = (dt * 10);
+
+      GstClockTime vpts = gst_util_uint64_scale (src->n_frames + 1, src->vinfo.fps_d * GST_SECOND, src->vinfo.fps_n);
+      cefGstOffset = GST_CLOCK_DIFF (cef_pts, vpts) + audio_latency;
+
+      GST_LOG_OBJECT(src,
+                     "calculated  pts offset from cef_pts: %"
+                     GST_TIME_FORMAT " to vpts %" GST_TIME_FORMAT
+                     " = %li ns",
+                     GST_TIME_ARGS (cef_pts),
+                     GST_TIME_ARGS (vpts),
+                     cefGstOffset);
+    }
+
+    cef_pts += cefGstOffset;
+
+    GST_LOG_OBJECT (src,
+                    "Handling audio stream packet with %d frames @pts %lu (cef_pts: %" GST_TIME_FORMAT ") %i",
+                    frames,
+                    pts,
+                    GST_TIME_ARGS (cef_pts),
+                    mRate);
+
+    if (nextBufTimeGuess == GST_CLOCK_TIME_NONE) {
+      // use pts from cef * 1_000_000
+      gst_pts = cef_pts;
+    } else {
+      GstClockTimeDiff abs_error = cef_pts > nextBufTimeGuess
+        ? cef_pts - nextBufTimeGuess
+        : nextBufTimeGuess - cef_pts;
+      // allow for a drift of 1ms
+      if (abs_error < GST_MSECOND) {
+        gst_pts = nextBufTimeGuess;
+      } else {
+        // use cef_pts
+        gst_pts = cef_pts;
+      }
+    }
+
+    prevBufTime = gst_pts;
+    nextBufTimeGuess = gst_pts + dt;
+
+    GST_BUFFER_DURATION (buf) = dt;
+    GST_BUFFER_PTS (buf) = gst_pts;
+    GST_BUFFER_DTS (buf) = gst_pts;
 
     if (!src->audio_buffers) {
       src->audio_buffers = gst_buffer_list_new();
@@ -342,6 +414,7 @@ class AudioHandler : public CefAudioHandler
 
   void OnAudioStreamStopped(CefRefPtr<CefBrowser> browser) override
   {
+    GST_LOG_OBJECT (src, "Audio stream stopping");
   }
 
   void OnAudioStreamError(CefRefPtr<CefBrowser> browser,
@@ -354,6 +427,11 @@ class AudioHandler : public CefAudioHandler
     GstCefSrc *src;
     gint mRate;
     gint mChannels;
+
+    GstClockTime nextBufTimeGuess = GST_CLOCK_TIME_NONE;
+    GstClockTime prevBufTime = GST_CLOCK_TIME_NONE;
+    GstClockTimeDiff cefGstOffset = 0;
+
     IMPLEMENT_REFCOUNTING(AudioHandler);
 };
 
@@ -653,6 +731,25 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
   GstCefSrc *src = GST_CEF_SRC (push_src);
   GList *tmp;
 
+  if (!src->is_live) {
+    g_mutex_lock(&src->on_paint_lock);
+    while (!src->painted && !src->flushing) {
+      g_cond_wait(&src->on_paint_cond, &src->on_paint_lock);
+    }
+
+    if (src->flushing) {
+      g_mutex_unlock(&src->on_paint_lock);
+      GST_DEBUG_OBJECT(src, "Flushing");
+      return GST_FLOW_FLUSHING;
+    }
+
+    if (src->painted) {
+      src->painted = FALSE;
+    }
+
+    g_mutex_unlock(&src->on_paint_lock);
+  }
+
   GST_OBJECT_LOCK (src);
 
   if (src->audio_events) {
@@ -672,12 +769,39 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_buffers = NULL;
   }
 
+
   GST_BUFFER_PTS (*buf) = gst_util_uint64_scale (src->n_frames, src->vinfo.fps_d * GST_SECOND, src->vinfo.fps_n);
   GST_BUFFER_DURATION (*buf) = gst_util_uint64_scale (GST_SECOND, src->vinfo.fps_d, src->vinfo.fps_n);
+
+  GST_DEBUG_OBJECT(src,
+                   "creating v_buffer pts: %" GST_TIME_FORMAT,
+                   GST_TIME_ARGS (GST_BUFFER_PTS (*buf)));
+
   src->n_frames++;
   GST_OBJECT_UNLOCK (src);
 
   return GST_FLOW_OK;
+}
+
+static gboolean gst_cef_src_unlock(GstBaseSrc *bsrc) {
+  GstCefSrc *src = GST_CEF_SRC (bsrc);
+
+  g_mutex_lock(&src->on_paint_lock);
+  src->flushing = TRUE;
+  g_cond_signal(&src->on_paint_cond);
+  g_mutex_unlock(&src->on_paint_lock);
+
+  return TRUE;
+}
+
+static gboolean gst_cef_src_unlock_stop(GstBaseSrc *bsrc) {
+  GstCefSrc *src = GST_CEF_SRC (bsrc);
+
+  g_mutex_lock(&src->on_paint_lock);
+  src->flushing = FALSE;
+  g_mutex_unlock(&src->on_paint_lock);
+
+  return TRUE;
 }
 
 /* Once we have started a first cefsrc for this process, we start
@@ -878,14 +1002,23 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
 
     break;
   }
+  case GST_STATE_CHANGE_READY_TO_PAUSED:
+  case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+  {
+    // TODO: this need to be NO_PREROLL according to docs
+    // https://gstreamer.freedesktop.org/documentation/additional/design/live-source.html?gi-language=c
+    // result = GST_STATE_CHANGE_NO_PREROLL;
+    break;
+  }
   default:
     break;
   }
 
-  if (result == GST_STATE_CHANGE_FAILURE) return result;
-  result = GST_ELEMENT_CLASS(parent_class)->change_state(src, transition);
+  if (result == GST_STATE_CHANGE_FAILURE || result == GST_STATE_CHANGE_NO_PREROLL) {
+    return result;
+  }
 
-  return result;
+  return GST_ELEMENT_CLASS(parent_class)->change_state(src, transition);
 }
 
 static gboolean
@@ -895,6 +1028,13 @@ gst_cef_src_start(GstBaseSrc *base_src)
   GstCefSrc *src = GST_CEF_SRC (base_src);
 
   GST_ELEMENT_PROGRESS(src, START, "open", ("Creating CEF browser client"));
+
+  if (!src->is_live) {
+    g_mutex_lock(&src->on_paint_lock);
+    src->flushing = FALSE;
+    g_cond_signal(&src->on_paint_cond);
+    g_mutex_unlock(&src->on_paint_lock);
+  }
 
   CefRefPtr<BrowserClient> browserClient = new BrowserClient(src);
 
@@ -972,6 +1112,13 @@ gst_cef_src_stop (GstBaseSrc *base_src)
   GstCefSrc *src = GST_CEF_SRC (base_src);
 
   GST_INFO_OBJECT (src, "Stopping");
+
+  if (!src->is_live) {
+    g_mutex_lock(&src->on_paint_lock);
+    src->flushing = TRUE;
+    g_cond_signal(&src->on_paint_cond);
+    g_mutex_unlock(&src->on_paint_lock);
+  }
 
   if (src->browser) {
     gst_cef_src_close_browser(src);
@@ -1111,6 +1258,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->chrome_extra_flags = g_value_dup_string (value);
       break;
     }
+    case PROP_IS_LIVE:
+    {
+      src->is_live = g_value_get_boolean (value);
+      break;
+    }
     case PROP_GPU:
     {
       GST_WARNING_OBJECT(
@@ -1197,6 +1349,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
     case PROP_CHROME_EXTRA_FLAGS:
       g_value_set_string (value, src->chrome_extra_flags);
       break;
+    case PROP_IS_LIVE:
+      g_value_set_boolean (value, src->is_live);
+      break;
     case PROP_GPU:
       g_value_set_boolean (value, src->gpu);
       break;
@@ -1242,12 +1397,21 @@ gst_cef_src_finalize (GObject *object)
 
   g_cond_clear(&src->state_cond);
   g_mutex_clear(&src->state_lock);
+
+  g_cond_clear (&src->on_paint_cond);
+  g_mutex_clear (&src->on_paint_lock);
 }
 
 static void
 gst_cef_src_init (GstCefSrc * src)
 {
   GstBaseSrc *base_src = GST_BASE_SRC (src);
+
+  src->is_live = DEFAULT_IS_LIVE;
+  g_cond_init (&src->on_paint_cond);
+  g_mutex_init (&src->on_paint_lock);
+  src->flushing = FALSE;
+  src->painted = FALSE;
 
   src->n_frames = 0;
   src->current_buffer = NULL;
@@ -1284,6 +1448,11 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
       g_param_spec_string ("url", "url",
           "The URL to display",
           DEFAULT_URL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
+
+  g_object_class_install_property (gobject_class, PROP_IS_LIVE,
+    g_param_spec_boolean ("is-live", "is-live",
+          "Operate in live mode (if true, we only sample the cef video buffer, if false we produce one frame per OnPaint)",
+          DEFAULT_IS_LIVE, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
   g_object_class_install_property (gobject_class, PROP_GPU,
     g_param_spec_boolean ("gpu", "gpu",
@@ -1352,6 +1521,9 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
   base_src_class->stop = GST_DEBUG_FUNCPTR(gst_cef_src_stop);
   base_src_class->get_times = GST_DEBUG_FUNCPTR(gst_cef_src_get_times);
   base_src_class->query = GST_DEBUG_FUNCPTR(gst_cef_src_query);
+
+  base_src_class->unlock = GST_DEBUG_FUNCPTR(gst_cef_src_unlock);
+  base_src_class->unlock_stop = GST_DEBUG_FUNCPTR(gst_cef_src_unlock_stop);
 
   gstelement_class->change_state = GST_DEBUG_FUNCPTR(gst_cef_src_change_state);
 
