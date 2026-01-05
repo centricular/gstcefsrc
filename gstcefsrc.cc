@@ -1,3 +1,4 @@
+#include "gst/gstinfo.h"
 #include <cstdio>
 #include <glib.h>
 #include <sstream>
@@ -257,6 +258,18 @@ class RenderHandler : public CefRenderHandler
       new_buffer = gst_buffer_new_allocate (NULL, src->vinfo.width * src->vinfo.height * 4, NULL);
       gst_buffer_fill (new_buffer, 0, buffer, w * h * 4);
 
+      GstClock *clock = gst_element_get_clock (GST_ELEMENT (src));
+      GstClockTime base_time = gst_element_get_base_time (GST_ELEMENT (src));
+      GstClockTime now_gst = gst_clock_get_time (clock);
+      gst_object_unref (clock);
+
+      // running time
+      GstClockTime gst_pts = (now_gst > base_time) ? now_gst - base_time : 0;
+
+      GST_BUFFER_PTS (new_buffer) = gst_pts;
+      // FIXME: this is temporary until we have the queue in place
+      GST_BUFFER_DURATION (new_buffer) = gst_util_uint64_scale (GST_SECOND, src->vinfo.fps_d, src->vinfo.fps_n);
+
       GST_OBJECT_LOCK (src);
       gst_buffer_replace (&(src->current_buffer), new_buffer);
       gst_buffer_unref (new_buffer);
@@ -325,6 +338,39 @@ class AudioHandler : public CefAudioHandler
       }
     }
     gst_buffer_unmap (buf, &info);
+
+    GstClock *clock = gst_element_get_clock (GST_ELEMENT (src));
+    GstClockTime base_time = gst_element_get_base_time (GST_ELEMENT (src));
+    GstClockTime now_unix = g_get_real_time () * 1000; // nsec
+    GstClockTime now_gst = gst_clock_get_time (clock);
+    GstClockTime cef_pts_unix = pts * 1000000; // pts is in msec
+    GstClockTime capture_gst;
+
+    // TODO: understand why we shouldn't just use cef pts here (with offset)
+    if (cef_pts_unix > now_unix) {
+      GstClockTime diff = cef_pts_unix - now_unix;
+      capture_gst = now_gst + diff;
+      GST_ERROR ("@@@@@@@@@@@@@ diff %lu", diff);
+    } else {
+      GstClockTime diff = now_unix - cef_pts_unix;
+      if (now_gst > diff)
+        capture_gst = now_gst - diff;
+      else
+        capture_gst = 0;
+      GST_ERROR ("@@@@@@@@@@@@@ diff -%lu", diff);
+    }
+
+    GstClockTime gst_pts;
+    if (capture_gst > base_time) {
+      gst_pts = capture_gst - base_time;
+    } else {
+      GST_WARNING_OBJECT (src, "audio pts (%lu) < base time (%lu)", capture_gst, base_time);
+      gst_pts = 0;
+    }
+    gst_object_unref (clock);
+
+    GST_BUFFER_PTS (buf) = gst_pts;
+    GST_ERROR ("@@@@@@ audio pts %lu", gst_pts);
 
     GST_OBJECT_LOCK (src);
 
@@ -655,6 +701,7 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
 
   GST_OBJECT_LOCK (src);
 
+  // FIXME: do not push events downstream while holding object lock!
   if (src->audio_events) {
     for (tmp = src->audio_events; tmp; tmp = tmp->next) {
       gst_pad_push_event (GST_BASE_SRC_PAD (src), (GstEvent *) tmp->data);
@@ -664,6 +711,9 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_events = NULL;
   }
 
+  // FIXME: this should use a queue and a condition variable, whenever a new
+  // video frame is available this should be woken up and then you take a
+  // frame out of the queue
   g_assert (src->current_buffer);
   *buf = gst_buffer_copy (src->current_buffer);
 
@@ -672,8 +722,6 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_buffers = NULL;
   }
 
-  GST_BUFFER_PTS (*buf) = gst_util_uint64_scale (src->n_frames, src->vinfo.fps_d * GST_SECOND, src->vinfo.fps_n);
-  GST_BUFFER_DURATION (*buf) = gst_util_uint64_scale (GST_SECOND, src->vinfo.fps_d, src->vinfo.fps_n);
   src->n_frames++;
   GST_OBJECT_UNLOCK (src);
 
@@ -993,6 +1041,7 @@ gst_cef_src_stop (GstBaseSrc *base_src)
   return TRUE;
 }
 
+// FIXME: when the queue is added this should not exist
 static void
 gst_cef_src_get_times (GstBaseSrc * base_src, GstBuffer * buffer,
     GstClockTime * start, GstClockTime * end)
@@ -1019,8 +1068,9 @@ gst_cef_src_query (GstBaseSrc * base_src, GstQuery * query)
 
       if (src->vinfo.fps_n) {
         latency = gst_util_uint64_scale (GST_SECOND, src->vinfo.fps_d, src->vinfo.fps_n);
+        // FIXME: latency should be the time between CEF frame generation and gst create
         GST_DEBUG_OBJECT (src, "Reporting latency: %" GST_TIME_FORMAT, GST_TIME_ARGS (latency));
-        gst_query_set_latency (query, TRUE, latency, GST_CLOCK_TIME_NONE);
+        gst_query_set_latency (query, TRUE, 2 * latency, GST_CLOCK_TIME_NONE);
       }
       res = TRUE;
       break;
@@ -1068,7 +1118,10 @@ gst_cef_src_set_caps (GstBaseSrc * base_src, GstCaps * caps)
 
   GST_OBJECT_LOCK (src);
   gst_video_info_from_caps (&src->vinfo, caps);
+  // FIXME: this is not necessary once we have the queue
   new_buffer = gst_buffer_new_allocate (NULL, src->vinfo.width * src->vinfo.height * 4, NULL);
+  GST_BUFFER_PTS (new_buffer) = 0;
+  GST_BUFFER_DURATION (new_buffer) = 0;
   gst_buffer_replace (&(src->current_buffer), new_buffer);
   gst_buffer_unref (new_buffer);
   src->browser->GetHost()->SetWindowlessFrameRate(gst_util_uint64_scale (1, src->vinfo.fps_n, src->vinfo.fps_d));
