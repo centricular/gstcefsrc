@@ -45,11 +45,10 @@ typedef enum : guint8 {
 
 struct _GstCefSrc {
   GstPushSrc parent;
-  GstBuffer *current_buffer;
-  GstBufferList *audio_buffers;
+  GstBufferList *audio_buffers; //under queue_lock
   GList *audio_events;
-  GstVideoInfo vinfo;
-  guint64 n_frames;
+  GstVideoInfo vinfo; //under queue_lock
+  guint64 n_frames; //under queue_lock
   gulong cef_work_id;
   gchar *url;
   gchar *chrome_extra_flags;
@@ -66,6 +65,11 @@ struct _GstCefSrc {
   GCond state_cond;
   GMutex state_lock;
   CefSrcState state;
+
+  GMutex queue_lock;
+  GCond queue_cond;
+  GQueue *queue;
+  gboolean flushing;
 };
 
 struct _GstCefSrcClass {
