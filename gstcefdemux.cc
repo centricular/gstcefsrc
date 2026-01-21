@@ -3,6 +3,7 @@
 #include "gstcefdemux.h"
 #include "gstcefaudiometa.h"
 
+#define CEF_SINK_CAPS "application/x-cef"
 #define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_AUDIO_CAPS "audio/x-raw, format=F32LE, rate=[1, 2147483647], channels=[1, 2147483647], layout=interleaved"
 
@@ -18,7 +19,7 @@ static GstStaticPadTemplate gst_cef_demux_sink_template =
 GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (CEF_VIDEO_CAPS)
+    GST_STATIC_CAPS (CEF_SINK_CAPS)
     );
 
 static GstStaticPadTemplate gst_cef_demux_video_src_template =
@@ -263,10 +264,19 @@ gst_cef_demux_sink_event (GstPad *pad, GstObject *parent, GstEvent *event)
       }
       break;
     }
-    case GST_EVENT_CAPS:
-      demux->vcaps_event = event;
+    case GST_EVENT_CAPS: {
+      GstCaps *upstream_caps;
+      GstStructure *s;
+      GstCaps *caps = gst_caps_new_empty ();
+
+      gst_event_parse_caps (event, &upstream_caps);
+      s = gst_structure_copy (gst_caps_get_structure (upstream_caps, 0));
+      gst_structure_set_name (s, "video/x-raw");
+      gst_caps_append_structure (caps, s);
+      demux->vcaps_event = gst_event_new_caps (caps);
       demux->need_caps = TRUE;
       event = NULL;
+    }
     /* We send our own */
     case GST_EVENT_SEGMENT:
     case GST_EVENT_STREAM_START:
