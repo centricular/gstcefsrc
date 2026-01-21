@@ -73,6 +73,7 @@ struct _GstCefSrc {
   GCond queue_cond;
   GQueue *queue;
   gboolean flushing;
+  gboolean downstream_demuxer;
 };
 
 struct _GstCefSrcClass {
