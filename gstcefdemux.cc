@@ -222,8 +222,12 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
     }
   }
 
-  ret = gst_flow_combiner_update_pad_flow (demux->flow_combiner, demux->vsrcpad,
-      gst_pad_push (demux->vsrcpad, buffer));
+  if (gst_buffer_get_size (buffer) > 0) {
+    ret = gst_flow_combiner_update_pad_flow (demux->flow_combiner, demux->vsrcpad,
+        gst_pad_push (demux->vsrcpad, buffer));
+  } else {
+    gst_buffer_unref (buffer);
+  }
 
   if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time) || demux->last_audio_time < GST_BUFFER_PTS (buffer)) {
     GstClockTime duration, timestamp;
@@ -267,13 +271,14 @@ gst_cef_demux_sink_event (GstPad *pad, GstObject *parent, GstEvent *event)
     case GST_EVENT_CAPS: {
       GstCaps *upstream_caps;
       GstStructure *s;
-      GstCaps *caps = gst_caps_new_empty ();
+      GstCaps *caps;
 
       gst_event_parse_caps (event, &upstream_caps);
       s = gst_structure_copy (gst_caps_get_structure (upstream_caps, 0));
       gst_structure_set_name (s, "video/x-raw");
-      gst_caps_append_structure (caps, s);
+      caps = gst_caps_new_full (s, NULL);
       demux->vcaps_event = gst_event_new_caps (caps);
+      gst_caps_unref (caps);
       demux->need_caps = TRUE;
       event = NULL;
     }

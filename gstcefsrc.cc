@@ -378,6 +378,7 @@ class AudioHandler : public CefAudioHandler
     }
 
     gst_buffer_list_add (src->audio_buffers, buf);
+    g_cond_signal (&src->queue_cond);
     g_mutex_unlock (&src->queue_lock);
 
     GST_LOG_OBJECT (src, "Handled audio stream packet");
@@ -707,7 +708,9 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_events = NULL;
   }
 
-  while (g_queue_is_empty(src->queue) && !src->flushing) {
+  while (g_queue_is_empty(src->queue) &&
+         !src->flushing &&
+         (!src->audio_buffers || !src->downstream_demuxer)) {
     g_cond_wait(&src->queue_cond, &src->queue_lock);
   }
 
@@ -717,7 +720,14 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     return GST_FLOW_FLUSHING;
   }
 
-  *buf = (GstBuffer *)g_queue_pop_head (src->queue);
+  if (!g_queue_is_empty (src->queue)) {
+    *buf = (GstBuffer *)g_queue_pop_head (src->queue);
+  } else if (src->downstream_demuxer) {
+    *buf = gst_buffer_new ();
+  } else {
+    g_mutex_unlock (&src->queue_lock);
+    return GST_FLOW_OK;
+  }
   g_assert_nonnull (*buf);
 
   if (src->audio_buffers) {
@@ -1098,6 +1108,8 @@ static GstCaps *
 gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
 {
   GstStructure *structure;
+  GstCefSrc *src = GST_CEF_SRC (base_src);
+  GstCaps *application_cef_caps = gst_caps_new_empty_simple ("application/x-cef");
 
   caps = gst_caps_make_writable (caps);
   structure = gst_caps_get_structure (caps, 0);
@@ -1114,6 +1126,9 @@ gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
   caps = GST_BASE_SRC_CLASS (parent_class)->fixate (base_src, caps);
 
   GST_INFO_OBJECT (base_src, "Fixated caps to %" GST_PTR_FORMAT, caps);
+
+  src->downstream_demuxer = gst_caps_can_intersect (caps, application_cef_caps);
+  gst_caps_unref (application_cef_caps);
 
   return caps;
 }
