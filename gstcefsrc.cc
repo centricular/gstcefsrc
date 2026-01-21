@@ -135,7 +135,7 @@ enum
 #define gst_cef_src_parent_class parent_class
 G_DEFINE_TYPE (GstCefSrc, gst_cef_src, GST_TYPE_PUSH_SRC);
 
-#define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
+#define CEF_VIDEO_CAPS "application/x-cef; video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_AUDIO_CAPS "audio/x-raw, format=F32LE, rate=[1, 2147483647], channels=[1, 2147483647], layout=interleaved"
 
 static GstStaticPadTemplate gst_cef_src_template =
@@ -245,7 +245,7 @@ class RenderHandler : public CefRenderHandler
     {
 	  GST_LOG_OBJECT(src, "getting view rect");
       g_mutex_lock (&src->queue_lock);
-      rect = CefRect(0, 0, src->vinfo.width ? src->vinfo.width : DEFAULT_WIDTH, src->vinfo.height ? src->vinfo.height : DEFAULT_HEIGHT);
+      rect = CefRect(0, 0, src->width ? src->width : DEFAULT_WIDTH, src->height ? src->height : DEFAULT_HEIGHT);
       g_mutex_unlock (&src->queue_lock);
     }
 
@@ -255,7 +255,7 @@ class RenderHandler : public CefRenderHandler
 
       GST_LOG_OBJECT (src, "painting, width / height: %d %d", w, h);
 
-      new_buffer = gst_buffer_new_allocate (NULL, src->vinfo.width * src->vinfo.height * 4, NULL);
+      new_buffer = gst_buffer_new_allocate (NULL, src->width * src->height * 4, NULL);
       gst_buffer_fill (new_buffer, 0, buffer, w * h * 4);
 
       GstClock *clock = gst_element_get_clock (GST_ELEMENT (src));
@@ -1077,8 +1077,8 @@ gst_cef_src_query (GstBaseSrc * base_src, GstQuery * query)
     {
       GstClockTime latency;
 
-      if (src->vinfo.fps_n) {
-        latency = gst_util_uint64_scale (GST_SECOND, src->vinfo.fps_d, src->vinfo.fps_n);
+      if (src->fps_n) {
+        latency = gst_util_uint64_scale (GST_SECOND, src->fps_d, src->fps_n);
         // FIXME: latency should be the time between CEF frame generation and gst create
         GST_DEBUG_OBJECT (src, "Reporting latency: %" GST_TIME_FORMAT, GST_TIME_ARGS (latency));
         gst_query_set_latency (query, TRUE, 2 * latency, GST_CLOCK_TIME_NONE);
@@ -1123,12 +1123,16 @@ gst_cef_src_set_caps (GstBaseSrc * base_src, GstCaps * caps)
 {
   GstCefSrc *src = GST_CEF_SRC (base_src);
   gboolean ret = TRUE;
+  GstStructure *s;
 
   GST_INFO_OBJECT (base_src, "Caps set to %" GST_PTR_FORMAT, caps);
 
   g_mutex_lock (&src->queue_lock);
-  gst_video_info_from_caps (&src->vinfo, caps);
-  src->browser->GetHost()->SetWindowlessFrameRate(gst_util_uint64_scale (1, src->vinfo.fps_n, src->vinfo.fps_d));
+  s = gst_caps_get_structure (caps, 0);
+  g_assert (gst_structure_get_int (s, "width", &src->width));
+  g_assert (gst_structure_get_int (s, "height", &src->height));
+  g_assert (gst_structure_get_fraction (s, "framerate", &src->fps_n, &src->fps_d));
+  src->browser->GetHost()->SetWindowlessFrameRate(gst_util_uint64_scale (1, src->fps_n, src->fps_d));
   src->browser->GetHost()->WasResized();
   g_mutex_unlock (&src->queue_lock);
 

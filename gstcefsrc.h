@@ -47,7 +47,10 @@ struct _GstCefSrc {
   GstPushSrc parent;
   GstBufferList *audio_buffers; //under queue_lock
   GList *audio_events;
-  GstVideoInfo vinfo; //under queue_lock
+  gint width; //under queue_lock
+  gint height; //under queue_lock
+  gint fps_n; //under queue_lock
+  gint fps_d; //under queue_lock
   guint64 n_frames; //under queue_lock
   gulong cef_work_id;
   gchar *url;
