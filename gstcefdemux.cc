@@ -230,18 +230,6 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
   }
 
   if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time) || demux->last_audio_time < GST_BUFFER_PTS (buffer)) {
-    GstClockTime duration, timestamp;
-
-    if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time)) {
-      timestamp = GST_BUFFER_PTS (buffer);
-      duration = GST_BUFFER_DURATION (buffer);
-    } else {
-      timestamp = demux->last_audio_time;
-      duration = GST_BUFFER_PTS (buffer) - demux->last_audio_time;
-    }
-
-    gst_pad_push_event (demux->asrcpad, gst_event_new_gap (timestamp, duration));
-
     demux->last_audio_time = GST_BUFFER_PTS (buffer);
   }
 
