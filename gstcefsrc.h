@@ -71,7 +71,7 @@ struct _GstCefSrc {
 
   GMutex queue_lock;
   GCond queue_cond;
-  GQueue *queue;
+  GstVecDeque *queue;
   gboolean flushing;
   gboolean downstream_demuxer;
 };
