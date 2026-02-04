@@ -3,7 +3,7 @@
 
 #include "include/cef_browser_process_handler.h"
 #include <gst/gst.h>
-#include <gst/base/gstpushsrc.h>
+#include <gst/base/base.h>
 #include <gst/video/video.h>
 #include <include/cef_app.h>
 #include <include/cef_client.h>
@@ -70,7 +70,7 @@ struct _GstCefSrc {
 
   GMutex queue_lock;
   GCond queue_cond;
-  GstVecDeque *queue;
+  GstQueueArray *queue; //TODO deprecated, revert when Ubuntu LTS uses 1.26
   gboolean flushing;
   gboolean downstream_demuxer;
 };

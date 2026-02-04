@@ -263,7 +263,7 @@ class RenderHandler : public CefRenderHandler
       GST_BUFFER_PTS (new_buffer) = gst_pts;
 
       g_mutex_lock (&src->queue_lock);
-      gst_vec_deque_push_tail (src->queue, new_buffer);
+      gst_queue_array_push_tail (src->queue, new_buffer);
       g_cond_signal (&src->queue_cond);
       g_mutex_unlock (&src->queue_lock);
 
@@ -702,7 +702,7 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_events = NULL;
   }
 
-  while (gst_vec_deque_is_empty(src->queue) &&
+  while (gst_queue_array_is_empty(src->queue) &&
          !src->flushing &&
          (!src->audio_buffers || !src->downstream_demuxer)) {
     g_cond_wait(&src->queue_cond, &src->queue_lock);
@@ -714,8 +714,8 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     return GST_FLOW_FLUSHING;
   }
 
-  if (!gst_vec_deque_is_empty (src->queue)) {
-    *buf = (GstBuffer *)gst_vec_deque_pop_head (src->queue);
+  if (!gst_queue_array_is_empty (src->queue)) {
+    *buf = (GstBuffer *)gst_queue_array_pop_head (src->queue);
   } else if (src->downstream_demuxer) {
     *buf = gst_buffer_new ();
   } else {
@@ -934,7 +934,7 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
     GstCefSrc *self = GST_CEF_SRC (src);
 
     g_mutex_lock (&self->queue_lock);
-    gst_vec_deque_clear (self->queue);
+    gst_queue_array_clear (self->queue);
     self->flushing = TRUE;
     g_cond_signal (&self->queue_cond);
     g_mutex_unlock (&self->queue_lock);
@@ -1054,7 +1054,7 @@ gst_cef_src_stop (GstBaseSrc *base_src)
   g_mutex_lock(&src->queue_lock);
   src->flushing = TRUE;
 
-  gst_vec_deque_clear (src->queue);
+  gst_queue_array_clear (src->queue);
 
   g_cond_signal(&src->queue_cond);
   g_mutex_unlock(&src->queue_lock);
@@ -1314,7 +1314,7 @@ gst_cef_src_finalize (GObject *object)
   g_cond_clear(&src->state_cond);
   g_mutex_clear(&src->state_lock);
 
-  gst_vec_deque_free (src->queue);
+  gst_queue_array_free (src->queue);
   g_mutex_clear(&src->queue_lock);
   g_cond_clear(&src->queue_cond);
 }
@@ -1342,8 +1342,8 @@ gst_cef_src_init (GstCefSrc * src)
 
   g_mutex_init(&src->queue_lock);
   g_cond_init(&src->queue_cond);
-  src->queue = gst_vec_deque_new (16);
-  gst_vec_deque_set_clear_func (src->queue, (GDestroyNotify) gst_buffer_unref);
+  src->queue = gst_queue_array_new (16);
+  gst_queue_array_set_clear_func (src->queue, (GDestroyNotify) gst_buffer_unref);
 }
 
 static void
