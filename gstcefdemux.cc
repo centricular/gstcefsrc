@@ -3,7 +3,7 @@
 #include "gstcefdemux.h"
 #include "gstcefaudiometa.h"
 
-#define CEF_SINK_CAPS "application/x-cef"
+#define CEF_SINK_CAPS "application/x-cef, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_AUDIO_CAPS "audio/x-raw, format=F32LE, rate=[1, 2147483647], channels=[1, 2147483647], layout=interleaved"
 
@@ -280,9 +280,43 @@ gst_cef_demux_sink_query (GstPad *pad, GstObject *parent, GstQuery *query)
   gboolean ret;
 
   switch (GST_QUERY_TYPE (query)) {
-    case GST_QUERY_CAPS:
-      ret = gst_pad_peer_query(demux->vsrcpad, query);
+    case GST_QUERY_CAPS: {
+      gint i, n;
+      GstCaps *downstream_caps, *filter, *tmp;
+      GstCaps *caps;
+
+      downstream_caps = gst_pad_peer_query_caps(demux->vsrcpad, NULL);
+
+      if (gst_caps_is_any (downstream_caps)) {
+        caps = gst_caps_new_empty_simple ("application/x-cef");
+      } else {
+        caps = gst_caps_new_empty ();
+        n = gst_caps_get_size (downstream_caps);
+        for (i = 0; i < n; i++) {
+          GstStructure *s = gst_caps_get_structure (downstream_caps, i);
+          s = gst_structure_copy (s);
+          gst_structure_set_name (s, "application/x-cef");
+          gst_caps_append_structure (caps, s);
+        }
+      }
+
+      gst_query_parse_caps (query, &filter);
+      if (filter) {
+        tmp = gst_caps_intersect (caps, filter);
+        gst_caps_unref (caps);
+        caps = tmp;
+      }
+
+      filter = gst_pad_get_pad_template_caps (pad);
+      tmp = gst_caps_intersect (caps, filter);
+      gst_caps_unref (caps);
+      caps = tmp;
+      gst_caps_unref (filter);
+
+      gst_query_set_caps_result (query, caps);
+      ret = TRUE;
       break;
+    }
     default:
       ret = gst_pad_query_default(pad, parent, query);
       break;
@@ -290,6 +324,56 @@ gst_cef_demux_sink_query (GstPad *pad, GstObject *parent, GstQuery *query)
 
   return ret;
 }
+
+static gboolean
+gst_cef_demux_video_src_query (GstPad *pad, GstObject *parent, GstQuery *query)
+{
+  gboolean ret;
+
+  switch (GST_QUERY_TYPE (query)) {
+    case GST_QUERY_CAPS: {
+      gint i, n;
+      GstCaps *downstream_caps, *filter, *tmp;
+      GstCaps *caps = gst_caps_new_empty();
+      GstPad *sink = gst_element_get_static_pad (GST_ELEMENT (parent), "sink");
+
+      g_assert_nonnull (sink);
+      downstream_caps = gst_pad_peer_query_caps(sink, NULL);
+      gst_object_unref (sink);
+
+      n = gst_caps_get_size (downstream_caps);
+      for (i = 0; i < n; i++) {
+        GstStructure *s = gst_caps_get_structure (downstream_caps, i);
+        s = gst_structure_copy (s);
+        gst_structure_set_name (s, "video/x-raw");
+        gst_caps_append_structure (caps, s);
+      }
+
+      gst_query_parse_caps (query, &filter);
+      if (filter) {
+        tmp = gst_caps_intersect (caps, filter);
+        gst_caps_unref (caps);
+        caps = tmp;
+      }
+
+      filter = gst_pad_get_pad_template_caps (pad);
+      tmp = gst_caps_intersect (caps, filter);
+      gst_caps_unref (filter);
+      gst_caps_unref (caps);
+      caps = tmp;
+
+      gst_query_set_caps_result (query, caps);
+      ret = TRUE;
+      break;
+    }
+    default:
+      ret = gst_pad_query_default(pad, parent, query);
+      break;
+  }
+
+  return ret;
+}
+
 
 static GstStateChangeReturn
 gst_cef_demux_change_state (GstElement * element, GstStateChange transition)
@@ -330,6 +414,7 @@ gst_cef_demux_init (GstCefDemux * demux)
 
   demux->flow_combiner = gst_flow_combiner_new ();
 
+  gst_pad_set_query_function (demux->vsrcpad, gst_cef_demux_video_src_query);
   gst_element_add_pad (GST_ELEMENT (demux), demux->vsrcpad);
   gst_flow_combiner_add_pad (demux->flow_combiner, demux->vsrcpad);
   gst_element_add_pad (GST_ELEMENT (demux), demux->asrcpad);
