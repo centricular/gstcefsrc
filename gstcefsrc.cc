@@ -1110,6 +1110,7 @@ gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
   GstStructure *structure;
   GstCefSrc *src = GST_CEF_SRC (base_src);
   GstCaps *application_cef_caps = gst_caps_new_empty_simple ("application/x-cef");
+  GstCaps *intersected_caps;
 
   caps = gst_caps_make_writable (caps);
   structure = gst_caps_get_structure (caps, 0);
@@ -1122,12 +1123,20 @@ gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
   else
     gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, DEFAULT_FPS_N, DEFAULT_FPS_D, nullptr);
 
+  intersected_caps = gst_caps_intersect (caps, application_cef_caps);
+
+  if (!gst_caps_is_empty (intersected_caps)) {
+    src->downstream_demuxer = TRUE;
+    gst_caps_unref (caps);
+    caps = intersected_caps;
+  } else {
+    src->downstream_demuxer = FALSE;
+  }
 
   caps = GST_BASE_SRC_CLASS (parent_class)->fixate (base_src, caps);
 
   GST_INFO_OBJECT (base_src, "Fixated caps to %" GST_PTR_FORMAT, caps);
 
-  src->downstream_demuxer = gst_caps_can_intersect (caps, application_cef_caps);
   gst_caps_unref (application_cef_caps);
 
   return caps;
