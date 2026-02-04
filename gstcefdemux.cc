@@ -145,10 +145,6 @@ gst_element_get_current_running_time (GstElement * element)
 static gboolean
 gst_cef_demux_push_audio_buffer (GstBuffer **buffer, guint idx, AudioPushData *push_data)
 {
-  push_data->demux->last_audio_time = gst_element_get_current_running_time (GST_ELEMENT_CAST (push_data->demux));
-  GST_BUFFER_DTS (*buffer) = push_data->demux->last_audio_time;
-  GST_BUFFER_PTS (*buffer) = push_data->demux->last_audio_time;
-
   GST_BUFFER_FLAG_UNSET (*buffer, GST_BUFFER_FLAG_DISCONT);
   if (push_data->demux->need_discont) {
     GST_BUFFER_FLAG_SET (*buffer, GST_BUFFER_FLAG_DISCONT);
@@ -222,10 +218,6 @@ gst_cef_demux_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
         gst_pad_push (demux->vsrcpad, buffer));
   } else {
     gst_buffer_unref (buffer);
-  }
-
-  if (!GST_CLOCK_TIME_IS_VALID(demux->last_audio_time) || demux->last_audio_time < GST_BUFFER_PTS (buffer)) {
-    demux->last_audio_time = GST_BUFFER_PTS (buffer);
   }
 
   if (ret != GST_FLOW_OK)
@@ -347,7 +339,6 @@ gst_cef_demux_init (GstCefDemux * demux)
   demux->need_caps = TRUE;
   demux->need_segment = TRUE;
   demux->need_discont = TRUE;
-  demux->last_audio_time = GST_CLOCK_TIME_NONE;
 }
 
 static void
