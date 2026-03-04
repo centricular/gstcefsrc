@@ -1088,7 +1088,7 @@ gst_cef_src_query (GstBaseSrc * base_src, GstQuery * query)
         latency = gst_util_uint64_scale (GST_SECOND, src->fps_d, src->fps_n);
         // FIXME: latency should be the time between CEF frame generation and gst create
         GST_DEBUG_OBJECT (src, "Reporting latency: %" GST_TIME_FORMAT, GST_TIME_ARGS (latency));
-        gst_query_set_latency (query, TRUE, 2 * latency, GST_CLOCK_TIME_NONE);
+        gst_query_set_latency (query, TRUE, latency, GST_CLOCK_TIME_NONE);
       }
       res = TRUE;
       break;
