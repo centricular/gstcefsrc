@@ -937,25 +937,22 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
 
     break;
   }
+  case GST_STATE_CHANGE_PAUSED_TO_READY: {
+    GstCefSrc *self = GST_CEF_SRC (src);
+
+    g_mutex_lock (&self->queue_lock);
+    gst_vec_deque_clear (self->queue);
+    self->flushing = TRUE;
+    g_cond_signal (&self->queue_cond);
+    g_mutex_unlock (&self->queue_lock);
+    break;
+  }
   default:
     break;
   }
 
   if (result == GST_STATE_CHANGE_FAILURE) return result;
   result = GST_ELEMENT_CLASS(parent_class)->change_state(src, transition);
-
-  switch (transition) {
-    case GST_STATE_CHANGE_PAUSED_TO_READY: {
-      GstCefSrc *self = GST_CEF_SRC (src);
-
-      g_mutex_lock (&self->queue_lock);
-      gst_vec_deque_clear (self->queue);
-      g_mutex_unlock (&self->queue_lock);
-      break;
-    }
-    default:
-      break;
-  }
 
   return result;
 }
