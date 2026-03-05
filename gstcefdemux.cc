@@ -3,7 +3,7 @@
 #include "gstcefdemux.h"
 #include "gstcefaudiometa.h"
 
-#define CEF_SINK_CAPS "application/x-cef, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
+#define CEF_DEMUX_SINK_CAPS "application/x-cef, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_VIDEO_CAPS "video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
 #define CEF_AUDIO_CAPS "audio/x-raw, format=F32LE, rate=[1, 2147483647], channels=[1, 2147483647], layout=interleaved"
 
@@ -19,7 +19,7 @@ static GstStaticPadTemplate gst_cef_demux_sink_template =
 GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (CEF_SINK_CAPS)
+    GST_STATIC_CAPS (CEF_DEMUX_SINK_CAPS)
     );
 
 static GstStaticPadTemplate gst_cef_demux_video_src_template =
