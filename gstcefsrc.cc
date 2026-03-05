@@ -1,4 +1,3 @@
-#include "gst/gstinfo.h"
 #include <cstdio>
 #include <glib.h>
 #include <sstream>
@@ -258,13 +257,8 @@ class RenderHandler : public CefRenderHandler
       new_buffer = gst_buffer_new_allocate (NULL, src->width * src->height * 4, NULL);
       gst_buffer_fill (new_buffer, 0, buffer, w * h * 4);
 
-      GstClock *clock = gst_element_get_clock (GST_ELEMENT (src));
-      GstClockTime base_time = gst_element_get_base_time (GST_ELEMENT (src));
-      GstClockTime now_gst = gst_clock_get_time (clock);
-      gst_object_unref (clock);
-
       // running time
-      GstClockTime gst_pts = (now_gst > base_time) ? now_gst - base_time : 0;
+      GstClockTime gst_pts = gst_element_get_current_running_time (GST_ELEMENT (src));
 
       GST_BUFFER_PTS (new_buffer) = gst_pts;
 
@@ -736,7 +730,6 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_buffers = NULL;
   }
 
-  src->n_frames++;
   g_mutex_unlock (&src->queue_lock);
 
   return GST_FLOW_OK;
@@ -977,10 +970,6 @@ gst_cef_src_start(GstBaseSrc *base_src)
     GST_ELEMENT_PROGRESS(src, ERROR, "open", ("CEF in failed state"));
     goto done;
   }
-
-  g_mutex_lock (&src->queue_lock);
-  src->n_frames = 0;
-  g_mutex_unlock (&src->queue_lock);
 
   GST_ELEMENT_PROGRESS(src, CONTINUE, "open", ("Creating CEF browser ..."));
 
@@ -1335,7 +1324,6 @@ gst_cef_src_init (GstCefSrc * src)
 {
   GstBaseSrc *base_src = GST_BASE_SRC (src);
 
-  src->n_frames = 0;
   src->audio_buffers = NULL;
   src->audio_events = NULL;
   src->state = CEF_SRC_CLOSED;

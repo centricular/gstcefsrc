@@ -51,7 +51,6 @@ struct _GstCefSrc {
   gint height; //under queue_lock
   gint fps_n; //under queue_lock
   gint fps_d; //under queue_lock
-  guint64 n_frames; //under queue_lock
   gulong cef_work_id;
   gchar *url;
   gchar *chrome_extra_flags;
