@@ -1,3 +1,5 @@
+#include "gst/base/base.h"
+#include "gst/gstbufferlist.h"
 #include <cstdio>
 #include <glib.h>
 #include <sstream>
@@ -264,6 +266,7 @@ class RenderHandler : public CefRenderHandler
 
       g_mutex_lock (&src->queue_lock);
       gst_queue_array_push_tail (src->queue, new_buffer);
+      GST_LOG_OBJECT (src, "frame buffer queue len: %u", gst_queue_array_get_length(src->queue));
       g_cond_signal (&src->queue_cond);
       g_mutex_unlock (&src->queue_lock);
 
@@ -372,6 +375,8 @@ class AudioHandler : public CefAudioHandler
     }
 
     gst_buffer_list_add (src->audio_buffers, buf);
+    GST_LOG_OBJECT (src, "audio buffer queue len: %u", gst_buffer_list_length(src->audio_buffers));
+
     g_cond_signal (&src->queue_cond);
     g_mutex_unlock (&src->queue_lock);
 
