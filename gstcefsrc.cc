@@ -1116,6 +1116,7 @@ gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
     gst_caps_unref (caps);
     caps = intersected_caps;
   } else {
+    gst_caps_unref (intersected_caps);
     src->downstream_demuxer = FALSE;
   }
 

@@ -1,6 +1,8 @@
 #include <gst/audio/audio.h>
 
 #include "gstcefdemux.h"
+#include "gst/gstcaps.h"
+#include "gst/gstevent.h"
 #include "gstcefaudiometa.h"
 
 #define CEF_DEMUX_SINK_CAPS "application/x-cef, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
@@ -252,9 +254,11 @@ gst_cef_demux_sink_event (GstPad *pad, GstObject *parent, GstEvent *event)
       s = gst_structure_copy (gst_caps_get_structure (upstream_caps, 0));
       gst_structure_set_name (s, "video/x-raw");
       caps = gst_caps_new_full (s, NULL);
+      if (demux->vcaps_event) gst_event_unref (demux->vcaps_event);
       demux->vcaps_event = gst_event_new_caps (caps);
       gst_caps_unref (caps);
       demux->need_caps = TRUE;
+      gst_event_unref (event);
       event = NULL;
     }
     /* We send our own */
@@ -299,6 +303,8 @@ gst_cef_demux_sink_query (GstPad *pad, GstObject *parent, GstQuery *query)
           gst_caps_append_structure (caps, s);
         }
       }
+
+      gst_caps_unref (downstream_caps);
 
       gst_query_parse_caps (query, &filter);
       if (filter) {
@@ -348,6 +354,8 @@ gst_cef_demux_video_src_query (GstPad *pad, GstObject *parent, GstQuery *query)
         gst_structure_set_name (s, "video/x-raw");
         gst_caps_append_structure (caps, s);
       }
+
+      gst_caps_unref (downstream_caps);
 
       gst_query_parse_caps (query, &filter);
       if (filter) {
