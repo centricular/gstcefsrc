@@ -688,6 +688,31 @@ void BrowserApp::OnBeforeCommandLineProcessing(const CefString &process_type,
     }
 }
 
+static gboolean
+gst_cef_src_unlock (GstBaseSrc * bsrc)
+{
+  GstCefSrc *src = GST_CEF_SRC (bsrc);
+
+  g_mutex_lock (&src->queue_lock);
+  src->flushing = TRUE;
+  g_cond_signal (&src->queue_cond);
+  g_mutex_unlock (&src->queue_lock);
+
+  return TRUE;
+}
+
+static gboolean
+gst_cef_src_unlock_stop (GstBaseSrc * bsrc)
+{
+  GstCefSrc *src = GST_CEF_SRC (bsrc);
+
+  g_mutex_lock (&src->queue_lock);
+  src->flushing = FALSE;
+  g_cond_signal (&src->queue_cond);
+  g_mutex_unlock (&src->queue_lock);
+
+  return TRUE;
+}
 
 /** cefsrc (Gstreamer) methods */
 
@@ -933,16 +958,6 @@ gst_cef_src_change_state(GstElement *src, GstStateChange transition)
     }
     g_mutex_unlock(&init_lock);
 
-    break;
-  }
-  case GST_STATE_CHANGE_PAUSED_TO_READY: {
-    GstCefSrc *self = GST_CEF_SRC (src);
-
-    g_mutex_lock (&self->queue_lock);
-    gst_queue_array_clear (self->queue);
-    self->flushing = TRUE;
-    g_cond_signal (&self->queue_cond);
-    g_mutex_unlock (&self->queue_lock);
     break;
   }
   default:
@@ -1434,6 +1449,8 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
   base_src_class->set_caps = GST_DEBUG_FUNCPTR(gst_cef_src_set_caps);
   base_src_class->start = GST_DEBUG_FUNCPTR(gst_cef_src_start);
   base_src_class->stop = GST_DEBUG_FUNCPTR(gst_cef_src_stop);
+  base_src_class->unlock = GST_DEBUG_FUNCPTR(gst_cef_src_unlock);
+  base_src_class->unlock_stop = GST_DEBUG_FUNCPTR(gst_cef_src_unlock_stop);
   base_src_class->query = GST_DEBUG_FUNCPTR(gst_cef_src_query);
 
   gstelement_class->change_state = GST_DEBUG_FUNCPTR(gst_cef_src_change_state);
