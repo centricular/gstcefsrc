@@ -72,8 +72,8 @@ The element can then be tested with:
 
 ``` shell
 GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
-    cefsrc url="https://soundcloud.com/platform/sama" ! \
-    video/x-raw, width=1920, height=1080, framerate=60/1 ! cefdemux name=d d.video ! \
+    cefsrc url="https://soundcloud.com/platform/sama" max-video-framerate=60/1 ! \
+    cefdemux name=d d.video ! video/x-raw, width=1920, height=1080 ! \
     queue max-size-bytes=0 max-size-buffers=0 max-size-time=3000000000 ! videoconvert ! \
     xvimagesink audiotestsrc do-timestamp=true is-live=true  volume=0.00 ! audiomixer name=mix ! \
     queue max-size-bytes=0 max-size-buffers=0 max-size-time=3000000000 ! audioconvert ! pulsesink \
@@ -84,9 +84,8 @@ Record website video + audio (with audiomixer)
 
 ``` shell
 GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 -e \
-    cefsrc url="https://soundcloud.com/platform/sama" ! \
-    video/x-raw, width=1920, height=1080, framerate=60/1 ! \
-    cefdemux name=demux ! queue ! videoconvert ! \
+    cefsrc url="https://soundcloud.com/platform/sama" max-video-framerate=60/1 ! \
+    cefdemux name=demux ! video/x-raw,width=1920, height=1080 ! queue ! videoconvert ! \
     queue max-size-bytes=0 max-size-buffers=0 max-size-time=3000000000 ! x264enc ! queue ! \
     mp4mux name=muxer ! filesink location='test.mp4' \
     audiotestsrc do-timestamp=true is-live=true  volume=0.0 ! audiomixer name=mix ! \
@@ -107,8 +106,8 @@ handling `web+http`, `web+https` and `web+file` protocols:
 
 ``` shell
 GST_PLUGIN_PATH=Release:$GST_PLUGIN_PATH gst-launch-1.0 \
-    cefbin name=cef cefsrc::url="https://soundcloud.com/platform/sama" \
-    cef.video ! video/x-raw, width=1920, height=1080, framerate=60/1 ! videoconvert ! xvimagesink \
+    cefbin name=cef cefsrc::url="https://soundcloud.com/platform/sama" max-video-framerate=60/1 \
+    cef.video ! video/x-raw, width=1920, height=1080 ! videoconvert ! xvimagesink \
     cef.audio ! audioconvert ! audiomixer ! autoaudiosink
 ```
 
@@ -170,9 +169,9 @@ Test that the GPU is accessible by running:
 
 ``` shell
 GST_CEF_CHROME_EXTRA_FLAGS="use-gl=egl, enable-gpu-rasterization,ignore-gpu-blocklist" \
-GST_CEF_GPU_ENABLED="set" gst-launch-1.0 -e cefsrc url="chrome://gpu" \
-  ! video/x-raw, width=1920, height=8080, framerate=1/1 \
+GST_CEF_GPU_ENABLED="set" gst-launch-1.0 -e cefsrc url="chrome://gpu" max-video-framerate=1/1 \
   ! cefdemux name=demux ! queue ! videoconvert \
+  ! video/x-raw, width=1920, height=8080 \
   ! pngenc ! multifilesink location="frame%d.png"
 ```
 

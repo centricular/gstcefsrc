@@ -131,12 +131,13 @@ enum
   PROP_JS_FLAGS,
   PROP_LOG_SEVERITY,
   PROP_CEF_CACHE_LOCATION,
+  PROP_MAX_VIDEO_FRAMERATE,
 };
 
 #define gst_cef_src_parent_class parent_class
 G_DEFINE_TYPE (GstCefSrc, gst_cef_src, GST_TYPE_PUSH_SRC);
 
-#define CEF_VIDEO_CAPS "application/x-cef, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1; video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=[1/1, 60/1], pixel-aspect-ratio=1/1"
+#define CEF_VIDEO_CAPS "application/x-cef, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=0/1, pixel-aspect-ratio=1/1; video/x-raw, format=BGRA, width=[1, 2147483647], height=[1, 2147483647], framerate=0/1, pixel-aspect-ratio=1/1"
 #define CEF_AUDIO_CAPS "audio/x-raw, format=F32LE, rate=[1, 2147483647], channels=[1, 2147483647], layout=interleaved"
 
 static GstStaticPadTemplate gst_cef_src_template =
@@ -1124,11 +1125,6 @@ gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
   gst_structure_fixate_field_nearest_int (structure, "width", DEFAULT_WIDTH);
   gst_structure_fixate_field_nearest_int (structure, "height", DEFAULT_HEIGHT);
 
-  if (gst_structure_has_field (structure, "framerate"))
-    gst_structure_fixate_field_nearest_fraction (structure, "framerate", DEFAULT_FPS_N, DEFAULT_FPS_D);
-  else
-    gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, DEFAULT_FPS_N, DEFAULT_FPS_D, nullptr);
-
   intersected_caps = gst_caps_intersect (caps, application_cef_caps);
 
   if (!gst_caps_is_empty (intersected_caps)) {
@@ -1162,7 +1158,6 @@ gst_cef_src_set_caps (GstBaseSrc * base_src, GstCaps * caps)
   s = gst_caps_get_structure (caps, 0);
   g_assert (gst_structure_get_int (s, "width", &src->width));
   g_assert (gst_structure_get_int (s, "height", &src->height));
-  g_assert (gst_structure_get_fraction (s, "framerate", &src->fps_n, &src->fps_d));
   src->browser->GetHost()->SetWindowlessFrameRate(gst_util_uint64_scale (1, src->fps_n, src->fps_d));
   src->browser->GetHost()->WasResized();
   g_mutex_unlock (&src->queue_lock);
@@ -1270,6 +1265,10 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->cef_cache_location = g_value_dup_string (value);
       break;
     }
+    case PROP_MAX_VIDEO_FRAMERATE:
+      src->fps_n = gst_value_get_fraction_numerator (value);
+      src->fps_d = gst_value_get_fraction_denominator (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -1309,6 +1308,9 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
       break;
     case PROP_CEF_CACHE_LOCATION:
       g_value_set_string (value, src->cef_cache_location);
+      break;
+    case PROP_MAX_VIDEO_FRAMERATE:
+      gst_value_set_fraction (value, src->fps_n, src->fps_d);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1354,6 +1356,8 @@ gst_cef_src_init (GstCefSrc * src)
   src->js_flags = NULL;
   src->log_severity = DEFAULT_LOG_SEVERITY;
   src->cef_cache_location = NULL;
+  src->fps_n = DEFAULT_FPS_N;
+  src->fps_d = DEFAULT_FPS_D;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
@@ -1436,6 +1440,12 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
           "(Example: /tmp/cef-cache/) - "
           "deprecated: set GST_CEF_CACHE_LOCATION in the environment instead",
           NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_MAX_VIDEO_FRAMERATE,
+      gst_param_spec_fraction ("max-video-framerate", "Max video framerate",
+          "Max video framerate to select",
+          0, 1, G_MAXINT, 1, DEFAULT_FPS_N, DEFAULT_FPS_D,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
