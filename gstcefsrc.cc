@@ -345,27 +345,28 @@ class AudioHandler : public CefAudioHandler
     if (cef_pts_unix > now_unix) {
       GstClockTime diff = cef_pts_unix - now_unix;
       capture_gst = now_gst + diff;
-      GST_DEBUG_OBJECT (src, "diff %lu", diff);
+      GST_DEBUG_OBJECT (src, "diff %" G_GUINT64_FORMAT, diff);
     } else {
       GstClockTime diff = now_unix - cef_pts_unix;
       if (now_gst > diff)
         capture_gst = now_gst - diff;
       else
         capture_gst = 0;
-      GST_DEBUG_OBJECT (src, "diff -%lu", diff);
+      GST_DEBUG_OBJECT (src, "diff -%" G_GUINT64_FORMAT, diff);
     }
 
     GstClockTime gst_pts;
     if (capture_gst > base_time) {
       gst_pts = capture_gst - base_time;
     } else {
-      GST_WARNING_OBJECT (src, "audio pts (%lu) < base time (%lu)", capture_gst, base_time);
+      GST_WARNING_OBJECT (src, "audio pts (%" G_GUINT64_FORMAT ") < base time (%"
+          G_GUINT64_FORMAT ")", capture_gst, base_time);
       gst_pts = 0;
     }
     gst_object_unref (clock);
 
     GST_BUFFER_PTS (buf) = gst_pts;
-    GST_DEBUG_OBJECT (src, "audio pts %lu", gst_pts);
+    GST_DEBUG_OBJECT (src, "audio pts %" G_GUINT64_FORMAT, gst_pts);
 
     g_mutex_lock (&src->queue_lock);
 
