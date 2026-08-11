@@ -11,7 +11,10 @@ project(gstcef)
 
 if (APPLE)
   enable_language(CXX OBJCXX)
-  set(CMAKE_OBJCXX_STANDARD 14)
+  # CEF 144 headers (base/cef_bind.h et al) use C++17 library features --
+  # std::void_t, conjunction, disjunction, bool_constant, in_place_t. CEF itself
+  # builds with -std=c++17 (cef_variables.cmake:290), so match it here.
+  set(CMAKE_OBJCXX_STANDARD 17)
   set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
 endif()
 
@@ -101,10 +104,16 @@ if(USE_SANDBOX)
   set(CMAKE_INSTALL_NAME_DIR "@rpath")
   add_compile_definitions("GST_CEF_USE_SANDBOX=1")
 endif()
-if (USE_SANDBOX AND (NOT DEFINED OS_LINUX))
-  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_SANDBOX_LIB_DEBUG}" "${CEF_SANDBOX_LIB_RELEASE}")
-else()
-  ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+# On macOS the CEF distribution ships only Chromium Embedded Framework.framework --
+# there is no import library (cef_variables.cmake defines CEF_LIB_* / CEF_SANDBOX_LIB_*
+# for OS_LINUX and OS_WINDOWS only). The framework is dlopen'd at runtime instead, via
+# gstcefloader.cc / cef_load_library(). So no libcef_lib target on APPLE.
+if (NOT APPLE)
+  if (USE_SANDBOX AND (NOT DEFINED OS_LINUX))
+    ADD_LOGICAL_TARGET("libcef_lib" "${CEF_SANDBOX_LIB_DEBUG}" "${CEF_SANDBOX_LIB_RELEASE}")
+  else()
+    ADD_LOGICAL_TARGET("libcef_lib" "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+  endif()
 endif()
 
 SET_CEF_TARGET_OUT_DIR()
@@ -121,7 +130,11 @@ endif()
 if (APPLE)
   target_sources("gstcef" PRIVATE gstcefnsapplication.mm)
 endif()
-target_link_libraries("gstcef" libcef_lib PkgConfig::PC_GLib)
+if (APPLE)
+  target_link_libraries("gstcef" PkgConfig::PC_GLib)
+else()
+  target_link_libraries("gstcef" libcef_lib PkgConfig::PC_GLib)
+endif()
 target_include_directories("gstcef" PUBLIC ${GST_INCLUDE_DIRS})
 set_target_properties("gstcef" PROPERTIES INSTALL_RPATH "$ORIGIN")
 set_target_properties("gstcef" PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
@@ -196,7 +209,8 @@ else()
       MACOSX_BUNDLE_GUI_IDENTIFIER "org.gstreamer.gstcefsubprocess${_plist_suffix}"
       )
 
-    target_link_libraries(${_helper_target} libcef_lib PkgConfig::PC_GLib)
+    # No libcef_lib on macOS (see note above) -- framework is loaded at runtime.
+    target_link_libraries(${_helper_target} PkgConfig::PC_GLib)
 
     # Add the Helper as a dependency of the main executable target.
     add_dependencies(gstcef "${_helper_target}")
