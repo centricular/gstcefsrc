@@ -257,6 +257,11 @@ class RenderHandler : public CefRenderHandler
 
       GST_LOG_OBJECT (src, "painting, width / height: %d %d", w, h);
 
+      if (GST_STATE (src) == GST_STATE_PAUSED) {
+        GST_LOG_OBJECT (src, "Discarding frame in the paused state");
+        return;
+      }
+
       new_buffer = gst_buffer_new_allocate (NULL, src->width * src->height * 4, NULL);
       gst_buffer_fill (new_buffer, 0, buffer, w * h * 4);
 
@@ -320,6 +325,11 @@ class AudioHandler : public CefAudioHandler
     GstBuffer *buf;
     GstMapInfo info;
     gint i, j;
+
+    if (GST_STATE (src) == GST_STATE_PAUSED) {
+      GST_LOG_OBJECT (src, "Discarding audio packet in the paused state");
+      return;
+    }
 
     GST_LOG_OBJECT (src, "Handling audio stream packet with %d frames", frames);
 
