@@ -56,6 +56,13 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
  * width * height * 4 bytes retained per paint — 8.3 MB at 1080p — until the
  * process is killed. Two lets a new frame land while one is in flight. */
 #define MAX_QUEUED_FRAMES 2
+
+/* Same reasoning for the audio packet list, which is drained by the same
+ * create() call. Packets are far smaller than frames, so this is set well
+ * above anything normal operation produces — the list is emptied on every
+ * video frame, so it sits at a handful of entries — and only trips when the
+ * consumer has stopped entirely. */
+#define MAX_QUEUED_AUDIO_BUFFERS 128
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
@@ -391,6 +398,15 @@ class AudioHandler : public CefAudioHandler
 
     if (!src->audio_buffers) {
       src->audio_buffers = gst_buffer_list_new();
+    }
+
+    /* As with the frame queue: nothing drains this while the pipeline is not
+     * PLAYING, so drop the oldest packets rather than grow without limit. */
+    guint n_audio = gst_buffer_list_length (src->audio_buffers);
+    if (n_audio >= MAX_QUEUED_AUDIO_BUFFERS) {
+      guint drop = n_audio - MAX_QUEUED_AUDIO_BUFFERS + 1;
+      GST_DEBUG_OBJECT (src, "audio queue full, dropping %u stale buffers", drop);
+      gst_buffer_list_remove (src->audio_buffers, 0, drop);
     }
 
     gst_buffer_list_add (src->audio_buffers, buf);
