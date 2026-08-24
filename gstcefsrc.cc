@@ -45,6 +45,24 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_HEIGHT 1080
 #define DEFAULT_FPS_N 30
 #define DEFAULT_FPS_D 1
+
+/* Upper bound on frames held between the browser thread and the streaming
+ * thread. CEF paints at the negotiated framerate (SetWindowlessFrameRate) and
+ * gst_cef_src_create() pops one frame per call, so in steady state the queue
+ * holds a single frame — which is the latency this element reports. The queue
+ * only grows when nothing is popping, and create() is gated behind
+ * gst_base_src_wait_playing(): a pipeline parked in PAUSED drains nothing at
+ * all while the browser keeps painting. Left unbounded that is
+ * width * height * 4 bytes retained per paint — 8.3 MB at 1080p — until the
+ * process is killed. Two lets a new frame land while one is in flight. */
+#define MAX_QUEUED_FRAMES 2
+
+/* Same reasoning for the audio packet list, which is drained by the same
+ * create() call. Packets are far smaller than frames, so this is set well
+ * above anything normal operation produces — the list is emptied on every
+ * video frame, so it sits at a handful of entries — and only trips when the
+ * consumer has stopped entirely. */
+#define MAX_QUEUED_AUDIO_BUFFERS 128
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
@@ -266,6 +284,13 @@ class RenderHandler : public CefRenderHandler
       GST_BUFFER_PTS (new_buffer) = gst_pts;
 
       g_mutex_lock (&src->queue_lock);
+      /* Drop the oldest frames rather than the one just painted: a consumer
+       * that has fallen behind wants current content, not a backlog. */
+      while (gst_queue_array_get_length (src->queue) >= MAX_QUEUED_FRAMES) {
+        GstBuffer *stale = (GstBuffer *) gst_queue_array_pop_head (src->queue);
+        GST_DEBUG_OBJECT (src, "queue full, dropping stale frame");
+        gst_buffer_unref (stale);
+      }
       gst_queue_array_push_tail (src->queue, new_buffer);
       GST_LOG_OBJECT (src, "frame buffer queue len: %u", gst_queue_array_get_length(src->queue));
       g_cond_signal (&src->queue_cond);
@@ -374,6 +399,15 @@ class AudioHandler : public CefAudioHandler
 
     if (!src->audio_buffers) {
       src->audio_buffers = gst_buffer_list_new();
+    }
+
+    /* As with the frame queue: nothing drains this while the pipeline is not
+     * PLAYING, so drop the oldest packets rather than grow without limit. */
+    guint n_audio = gst_buffer_list_length (src->audio_buffers);
+    if (n_audio >= MAX_QUEUED_AUDIO_BUFFERS) {
+      guint drop = n_audio - MAX_QUEUED_AUDIO_BUFFERS + 1;
+      GST_DEBUG_OBJECT (src, "audio queue full, dropping %u stale buffers", drop);
+      gst_buffer_list_remove (src->audio_buffers, 0, drop);
     }
 
     gst_buffer_list_add (src->audio_buffers, buf);
