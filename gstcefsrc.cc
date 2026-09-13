@@ -45,6 +45,19 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_HEIGHT 1080
 #define DEFAULT_FPS_N 30
 #define DEFAULT_FPS_D 1
+
+/* Upper bound on frames held between the browser thread and the streaming
+ * thread. OnPaint discards frames in PAUSED, but in PLAYING it queues every
+ * paint whether or not gst_cef_src_create() is running. If the streaming task
+ * has stopped (e.g. on GST_FLOW_NOT_NEGOTIATED), nothing pops and each paint
+ * retains width * height * 4 bytes. In steady state create() pops one frame
+ * per paint; two lets a new frame land while one is in flight. */
+#define MAX_QUEUED_FRAMES 2
+
+/* Bound for the audio packet list, drained by the same create() call. It is
+ * emptied on every video frame and normally holds a handful of packets, so
+ * this only trips once create() has stopped. */
+#define MAX_QUEUED_AUDIO_BUFFERS 128
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
@@ -271,6 +284,13 @@ class RenderHandler : public CefRenderHandler
       GST_BUFFER_PTS (new_buffer) = gst_pts;
 
       g_mutex_lock (&src->queue_lock);
+      /* Drop the oldest frames rather than the one just painted: a consumer
+       * that has fallen behind wants current content, not a backlog. */
+      while (gst_queue_array_get_length (src->queue) >= MAX_QUEUED_FRAMES) {
+        GstBuffer *stale = (GstBuffer *) gst_queue_array_pop_head (src->queue);
+        GST_DEBUG_OBJECT (src, "queue full, dropping stale frame");
+        gst_buffer_unref (stale);
+      }
       gst_queue_array_push_tail (src->queue, new_buffer);
       GST_LOG_OBJECT (src, "frame buffer queue len: %u", gst_queue_array_get_length(src->queue));
       g_cond_signal (&src->queue_cond);
@@ -384,6 +404,14 @@ class AudioHandler : public CefAudioHandler
 
     if (!src->audio_buffers) {
       src->audio_buffers = gst_buffer_list_new();
+    }
+
+    /* Nothing drains this once create() has stopped; drop the oldest packets. */
+    guint n_audio = gst_buffer_list_length (src->audio_buffers);
+    if (n_audio >= MAX_QUEUED_AUDIO_BUFFERS) {
+      guint drop = n_audio - MAX_QUEUED_AUDIO_BUFFERS + 1;
+      GST_DEBUG_OBJECT (src, "audio queue full, dropping %u stale buffers", drop);
+      gst_buffer_list_remove (src->audio_buffers, 0, drop);
     }
 
     gst_buffer_list_add (src->audio_buffers, buf);
