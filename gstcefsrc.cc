@@ -55,6 +55,7 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_SANDBOX FALSE
 #endif
 #define DEFAULT_LISTEN_FOR_JS_SIGNALS FALSE
+#define DEFAULT_UNPREMULTIPLY FALSE
 
 using CefStatus = enum : guint8 {
   // CEF was either unloaded successfully or not yet loaded.
@@ -132,6 +133,7 @@ enum
   PROP_LOG_SEVERITY,
   PROP_CEF_CACHE_LOCATION,
   PROP_MAX_VIDEO_FRAMERATE,
+  PROP_UNPREMULTIPLY,
 };
 
 #define gst_cef_src_parent_class parent_class
@@ -726,6 +728,50 @@ gst_cef_src_unlock_stop (GstBaseSrc * bsrc)
   return TRUE;
 }
 
+/* Chromium paints premultiplied alpha, while raw video in GStreamer is
+ * conventionally straight alpha. unpremultiply_lut[a << 8 | c] is
+ * c * 255 / a, rounded to nearest and clamped. Rows 0 and 255 are never
+ * used: those alpha values encode identically either way. */
+static guint8 unpremultiply_lut[256 * 256];
+
+static void
+gst_cef_src_init_unpremultiply_lut (void)
+{
+  for (guint a = 1; a < 255; a++) {
+    for (guint c = 0; c < 256; c++) {
+      unpremultiply_lut[a << 8 | c] = MIN ((c * 255 + a / 2) / a, 255);
+    }
+  }
+}
+
+static void
+gst_cef_src_unpremultiply (GstCefSrc *src, GstBuffer *buffer)
+{
+  GstMapInfo map;
+
+  if (!gst_buffer_map (buffer, &map, GST_MAP_READWRITE)) {
+    GST_WARNING_OBJECT (src, "Failed to map buffer for unpremultiplying");
+    return;
+  }
+
+  guint8 *p = map.data;
+  const guint8 *end = p + (map.size & ~(gsize) 3);
+
+  for (; p < end; p += 4) {
+    guint a = p[3];
+
+    if (a == 0 || a == 255)
+      continue;
+
+    const guint8 *row = unpremultiply_lut + (a << 8);
+    p[0] = row[p[0]];
+    p[1] = row[p[1]];
+    p[2] = row[p[2]];
+  }
+
+  gst_buffer_unmap (buffer, &map);
+}
+
 /** cefsrc (Gstreamer) methods */
 
 static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
@@ -773,6 +819,18 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
   }
 
   g_mutex_unlock (&src->queue_lock);
+
+  /* Done here on the streaming thread rather than in OnPaint so that the
+   * browser's paint callback is not held up, and outside queue_lock so that
+   * OnPaint can keep queueing while a frame is converted. The buffer was
+   * allocated by OnPaint and is only referenced by us, so it is converted
+   * in place. */
+  GST_OBJECT_LOCK (src);
+  gboolean unpremultiply = src->unpremultiply;
+  GST_OBJECT_UNLOCK (src);
+
+  if (unpremultiply && gst_buffer_get_size (*buf) > 0)
+    gst_cef_src_unpremultiply (src, *buf);
 
   return GST_FLOW_OK;
 }
@@ -1292,6 +1350,11 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->fps_n = gst_value_get_fraction_numerator (value);
       src->fps_d = gst_value_get_fraction_denominator (value);
       break;
+    case PROP_UNPREMULTIPLY:
+      GST_OBJECT_LOCK (src);
+      src->unpremultiply = g_value_get_boolean (value);
+      GST_OBJECT_UNLOCK (src);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -1334,6 +1397,11 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
       break;
     case PROP_MAX_VIDEO_FRAMERATE:
       gst_value_set_fraction (value, src->fps_n, src->fps_d);
+      break;
+    case PROP_UNPREMULTIPLY:
+      GST_OBJECT_LOCK (src);
+      g_value_set_boolean (value, src->unpremultiply);
+      GST_OBJECT_UNLOCK (src);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1381,6 +1449,7 @@ gst_cef_src_init (GstCefSrc * src)
   src->cef_cache_location = NULL;
   src->fps_n = DEFAULT_FPS_N;
   src->fps_d = DEFAULT_FPS_D;
+  src->unpremultiply = DEFAULT_UNPREMULTIPLY;
 
   gst_base_src_set_format (base_src, GST_FORMAT_TIME);
   gst_base_src_set_live (base_src, TRUE);
@@ -1470,6 +1539,13 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
           0, 1, G_MAXINT, 1, DEFAULT_FPS_N, DEFAULT_FPS_D,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
+  g_object_class_install_property (gobject_class, PROP_UNPREMULTIPLY,
+    g_param_spec_boolean ("unpremultiply", "unpremultiply",
+          "Convert the premultiplied alpha that Chromium renders to straight "
+          "alpha, the usual convention for raw video. "
+          "When disabled, video buffers carry premultiplied alpha",
+          DEFAULT_UNPREMULTIPLY, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_PLAYING)));
+
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",
       "Creates a video stream from an embedded Chromium browser",
@@ -1489,6 +1565,8 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
   gstelement_class->change_state = GST_DEBUG_FUNCPTR(gst_cef_src_change_state);
 
   push_src_class->create = GST_DEBUG_FUNCPTR(gst_cef_src_create);
+
+  gst_cef_src_init_unpremultiply_lut ();
 
   GST_DEBUG_CATEGORY_INIT (cef_src_debug, "cefsrc", 0,
       "Chromium Embedded Framework Source");
