@@ -71,6 +71,8 @@ struct _GstCefSrc {
   GMutex queue_lock;
   GCond queue_cond;
   GstQueueArray *queue; //TODO deprecated, revert when Ubuntu LTS uses 1.26
+  GstBuffer *last_buffer; //under queue_lock
+  gint64 last_video_time; //under queue_lock, monotonic time last_buffer was pushed
   gboolean flushing;
   gboolean downstream_demuxer;
 };

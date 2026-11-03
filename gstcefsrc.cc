@@ -744,10 +744,24 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
     src->audio_events = NULL;
   }
 
+  /* CEF only paints when the page changes. A live source must keep producing
+   * regardless, so once a frame has been painted, wait at most one frame at
+   * max-video-framerate for the next one and repeat the last frame if none
+   * comes. Counted from the last video frame pushed: audio wakes us far more
+   * often. */
+  gint64 repeat_at = -1;
+  if (gst_base_src_is_live (GST_BASE_SRC (src)) && src->last_buffer && src->fps_n > 0)
+    repeat_at = src->last_video_time +
+        gst_util_uint64_scale (G_USEC_PER_SEC, src->fps_d, src->fps_n);
+
   while (gst_queue_array_is_empty(src->queue) &&
          !src->flushing &&
          (!src->audio_buffers || !src->downstream_demuxer)) {
-    g_cond_wait(&src->queue_cond, &src->queue_lock);
+    if (repeat_at < 0) {
+      g_cond_wait(&src->queue_cond, &src->queue_lock);
+    } else if (!g_cond_wait_until(&src->queue_cond, &src->queue_lock, repeat_at)) {
+      break;
+    }
   }
 
   if (src->flushing) {
@@ -758,7 +772,15 @@ static GstFlowReturn gst_cef_src_create(GstPushSrc *push_src, GstBuffer **buf)
 
   if (!gst_queue_array_is_empty (src->queue)) {
     *buf = (GstBuffer *)gst_queue_array_pop_head (src->queue);
-  } else if (src->downstream_demuxer) {
+    gst_buffer_replace (&src->last_buffer, *buf);
+    src->last_video_time = g_get_monotonic_time ();
+  } else if (repeat_at >= 0 && g_get_monotonic_time () >= repeat_at) {
+    GST_LOG_OBJECT (src, "No paint for a frame, repeating the last one");
+    *buf = gst_buffer_copy (src->last_buffer);
+    GST_BUFFER_PTS (*buf) = gst_element_get_current_running_time (GST_ELEMENT (src));
+    GST_BUFFER_FLAG_UNSET (*buf, GST_BUFFER_FLAG_DISCONT);
+    src->last_video_time = g_get_monotonic_time ();
+  } else if (src->downstream_demuxer && src->audio_buffers) {
     *buf = gst_buffer_new ();
   } else {
     g_mutex_unlock (&src->queue_lock);
@@ -1099,6 +1121,7 @@ gst_cef_src_stop (GstBaseSrc *base_src)
   src->flushing = TRUE;
 
   gst_queue_array_clear (src->queue);
+  gst_buffer_replace (&src->last_buffer, NULL);
 
   g_cond_signal(&src->queue_cond);
   g_mutex_unlock(&src->queue_lock);
@@ -1181,6 +1204,8 @@ gst_cef_src_set_caps (GstBaseSrc * base_src, GstCaps * caps)
   s = gst_caps_get_structure (caps, 0);
   g_assert (gst_structure_get_int (s, "width", &src->width));
   g_assert (gst_structure_get_int (s, "height", &src->height));
+  /* A frame painted at the old size must not be repeated at the new one */
+  gst_buffer_replace (&src->last_buffer, NULL);
   src->browser->GetHost()->SetWindowlessFrameRate(gst_util_uint64_scale (1, src->fps_n, src->fps_d));
   src->browser->GetHost()->WasResized();
   g_mutex_unlock (&src->queue_lock);
@@ -1361,6 +1386,7 @@ gst_cef_src_finalize (GObject *object)
   g_mutex_clear(&src->state_lock);
 
   gst_queue_array_free (src->queue);
+  gst_buffer_replace (&src->last_buffer, NULL);
   g_mutex_clear(&src->queue_lock);
   g_cond_clear(&src->queue_cond);
 }
