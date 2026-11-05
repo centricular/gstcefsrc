@@ -347,17 +347,18 @@ class AudioHandler : public CefAudioHandler
 
     GstClock *clock = gst_element_get_clock (GST_ELEMENT (src));
     GstClockTime base_time = gst_element_get_base_time (GST_ELEMENT (src));
-    GstClockTime now_unix = g_get_real_time () * 1000; // nsec
+    // CEF stamps audio packets on the monotonic clock, not the Unix epoch its docs still describe
+    GstClockTime now_mono = g_get_monotonic_time () * 1000; // nsec
     GstClockTime now_gst = gst_clock_get_time (clock);
-    GstClockTime cef_pts_unix = pts * 1000000; // pts is in msec
+    GstClockTime cef_pts = pts * 1000000; // pts is in msec
     GstClockTime capture_gst;
 
-    if (cef_pts_unix > now_unix) {
-      GstClockTime diff = cef_pts_unix - now_unix;
+    if (cef_pts > now_mono) {
+      GstClockTime diff = cef_pts - now_mono;
       capture_gst = now_gst + diff;
       GST_DEBUG_OBJECT (src, "diff %" G_GUINT64_FORMAT, diff);
     } else {
-      GstClockTime diff = now_unix - cef_pts_unix;
+      GstClockTime diff = now_mono - cef_pts;
       if (now_gst > diff)
         capture_gst = now_gst - diff;
       else
